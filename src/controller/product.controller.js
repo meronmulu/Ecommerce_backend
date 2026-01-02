@@ -53,63 +53,32 @@ const getProductById = async (req, res) => {
 };
 
 // UPDATE PRODUCT (seller or admin)
-const updateProduct = async (req, res) => {
-  try {
-    // 🚫 Reject invalid JSON (Postman mistake protection)
-    if (typeof req.body !== "object") {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid JSON body",
-      });
-    }
-
+const updateProduct = async (req, res) => { 
+  try { 
     const product = await Product.findById(req.params.id);
-
-    // ❌ Product not found
-    if (!product) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Product not found" });
+     if (!product) { 
+      return res.status(404).json(
+      { 
+        success: false, 
+        message: "Product not found" 
+      }); 
     }
-
-    // 🔐 Authorization check
-    if (
-      product.sellerId.toString() !== req.user.userId &&
-      req.user.role !== "ADMIN"
-    ) {
-      return res
-        .status(403)
-        .json({ success: false, message: "Not authorized" });
-    }
-
-    // 🚫 Prevent forbidden field updates
-    delete req.body.sellerId;
-    delete req.body.createdAt;
-    delete req.body.updatedAt;
-    delete req.body.__v;
-
-    // ✅ Force update (works for title, specs, everything)
-    const updatedProduct = await Product.findByIdAndUpdate(
-      req.params.id,
-      { $set: req.body },
-      {
-        new: true,
-        runValidators: true,
-      }
-    );
-
-    res.status(200).json({
-      success: true,
-      message: "Product updated",
-      data: updatedProduct,
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
-  }
-};
+      if ( product.sellerId.toString() !== req.user.userId && req.user.role !== "ADMIN" )  { 
+        return res.status(403).json({
+           success: false, 
+           message: "Not authorized"
+           }); 
+          }
+            Object.assign(product, req.body); 
+            await product.save(); 
+            res.status(200).json({ 
+              success: true,
+               message: "Product updated", 
+               data: product, }); 
+          } catch (error) {
+             res.status(500).json({ 
+              success: false, 
+              message: error.message }); } };
 
 
 
