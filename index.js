@@ -3,6 +3,7 @@ require("dotenv").config();
 
 const express = require("express");
 const userRoutes = require("./src/routes/user.routes");
+const productRoutes = require("./src/routes/product.routes")
 const connectDB = require("./src/config/db");
 
 const app = express();
@@ -10,8 +11,12 @@ const app = express();
 // 2. Connect to Database
 connectDB();
 
+
+
 app.use(express.json());
 app.use("/api/users", userRoutes);
+app.use("/api/products", productRoutes);
+
 
 const PORT = process.env.PORT || 3000;
 
