@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
-const { createWalletOrder, getMyOrders, getSoldProducts } = require("../controllers/order.controller");
-const { authenticateUser } = require("../middleware/auth.middleware");
+const { createWalletOrder, getMyOrders, getSoldProducts } = require("../controller/order.controller");
+const { authenticateUser } = require("../middlewares/authMiddleware");
 
 // Buy product with wallet
 router.post("/wallet", authenticateUser, createWalletOrder);

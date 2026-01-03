@@ -1,21 +1,27 @@
-const Order = require("../models/Order");
-const Product = require("../models/Product");
+const Order = require("../models/order.model");
+const Product = require("../models/product.model");
 const { createTransaction } = require("./transaction.controller");
 
 // Create order with wallet payment
+const User = require("../models/user.model");
+
 const createWalletOrder = async (req, res) => {
   try {
     const { productId } = req.body;
-    const buyerId = req.user._id;
+    const buyerId = req.user.userId;
+
+    const buyer = await User.findById(buyerId);
+    if (!buyer) return res.status(404).json({ message: "User not found" });
 
     const product = await Product.findById(productId);
-    if (!product || product.status !== "ACTIVE")
+    if (!product || product.status !== "ACTIVE") {
       return res.status(400).json({ message: "Product not available" });
+    }
 
-    if (req.user.walletBalance < product.price)
-      return res.status(400).json({ message: "Insufficient wallet balance" });
+    if (buyer.walletBalance < product.price) {
+      return res.status(400).json({ message: "Insufficient balance" });
+    }
 
-    // Create order
     const order = await Order.create({
       buyerId,
       sellerId: product.sellerId,
@@ -25,44 +31,40 @@ const createWalletOrder = async (req, res) => {
       status: "COMPLETED",
     });
 
-    // Log wallet transaction (debit)
-    await createTransaction({
-      userId: buyerId,
-      orderId: order._id,
-      type: "DEBIT",
-      amount: product.price,
-      reason: `Purchase of ${product.title}`,
-    });
+    buyer.walletBalance -= product.price;
+    await buyer.save();
 
-    // Mark product as SOLD
     product.status = "SOLD";
     await product.save();
 
-    res.json({ message: "Payment successful, order completed", order });
+    res.json({ message: "Payment successful", order });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 };
 
-// Get all orders of logged-in buyer
+
+// Buyer orders
 const getMyOrders = async (req, res) => {
   try {
-    const orders = await Order.find({ buyerId: req.user._id })
+    const orders = await Order.find({ buyerId: req.user.userId })
       .populate("productId", "title price category")
       .sort({ createdAt: -1 });
+
     res.json(orders);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 };
 
-// Get all products sold by logged-in seller
+// Seller sold products
 const getSoldProducts = async (req, res) => {
   try {
-    const orders = await Order.find({ sellerId: req.user._id })
+    const orders = await Order.find({ sellerId: req.user.userId })
       .populate("productId", "title price category")
       .populate("buyerId", "name email")
       .sort({ createdAt: -1 });
+
     res.json(orders);
   } catch (err) {
     res.status(500).json({ message: err.message });

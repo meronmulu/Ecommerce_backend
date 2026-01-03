@@ -1,5 +1,5 @@
-const Transaction = require("../models/Transaction");
-const User = require("../models/User");
+const Transaction = require("../models/transaction.model");
+const User = require("../models/user.model");
 
 // Create a transaction (can be used by order controller or top-up)
 const createTransaction = async ({ userId, orderId = null, type, amount, reason }) => {

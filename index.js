@@ -3,7 +3,11 @@ require("dotenv").config();
 
 const express = require("express");
 const userRoutes = require("./src/routes/user.routes");
-const productRoutes = require("./src/routes/product.routes")
+const productRoutes = require("./src/routes/product.routes");
+const orderRoutes = require("./src/routes/order.routes")
+const walletRoutes = require("./src/routes/wallet.routes");
+
+
 const connectDB = require("./src/config/db");
 
 const app = express();
@@ -16,6 +20,11 @@ connectDB();
 app.use(express.json());
 app.use("/api/users", userRoutes);
 app.use("/api/products", productRoutes);
+app.use("/api/orders", orderRoutes);app.use("/api/wallet", walletRoutes);
+app.use("/api/wallet", walletRoutes);
+
+
+
 
 
 const PORT = process.env.PORT || 3000;
