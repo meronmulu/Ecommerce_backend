@@ -1,15 +1,18 @@
 const express = require("express");
 const router = express.Router();
-const { createWalletOrder, getMyOrders, getSoldProducts } = require("../controller/order.controller");
-const { authenticateUser } = require("../middlewares/authMiddleware");
+const {
+  createOrder,
+  getMyOrders,
+  cancelOrder,
+  getAllOrders
+} = require("../controller/order.controller");
+const {authenticateUser,authorizeRoles} = require("../middlewares/authMiddleware");
 
-// Buy product with wallet
-router.post("/wallet", authenticateUser, createWalletOrder);
-
-// View buyer orders
+router.post("/", authenticateUser, createOrder);
 router.get("/my", authenticateUser, getMyOrders);
+router.patch("/:id/cancel", authenticateUser, cancelOrder);
+router.get("/all", authenticateUser,authorizeRoles("ADMIN"), getAllOrders);
 
-// View seller sold products
-router.get("/sold", authenticateUser, getSoldProducts);
+
 
 module.exports = router;

@@ -1,74 +1,112 @@
 const Order = require("../models/order.model");
 const Product = require("../models/product.model");
-const { createTransaction } = require("./transaction.controller");
 
-// Create order with wallet payment
-const User = require("../models/user.model");
-
-const createWalletOrder = async (req, res) => {
+// CREATE ORDER
+const createOrder = async (req, res) => {
   try {
-    const { productId } = req.body;
-    const buyerId = req.user.userId;
+    const product = await Product.findById(req.body.productId);
 
-    const buyer = await User.findById(buyerId);
-    if (!buyer) return res.status(404).json({ message: "User not found" });
-
-    const product = await Product.findById(productId);
     if (!product || product.status !== "ACTIVE") {
-      return res.status(400).json({ message: "Product not available" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Product not available" });
     }
 
-    if (buyer.walletBalance < product.price) {
-      return res.status(400).json({ message: "Insufficient balance" });
+    // buyer cannot buy own product
+    if (product.sellerId.toString() === req.user.userId) {
+      return res.status(400).json({
+        success: false,
+        message: "You cannot buy your own product",
+      });
     }
 
     const order = await Order.create({
-      buyerId,
+      buyerId: req.user.userId,
       sellerId: product.sellerId,
       productId: product._id,
       amount: product.price,
-      paymentMethod: "WALLET",
-      status: "COMPLETED",
     });
 
-    buyer.walletBalance -= product.price;
-    await buyer.save();
-
-    product.status = "SOLD";
-    await product.save();
-
-    res.json({ message: "Payment successful", order });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
+    res.status(201).json({
+      success: true,
+      message: "Order created",
+      data: order,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
-
-// Buyer orders
+// GET MY ORDERS (buyer or seller)
 const getMyOrders = async (req, res) => {
   try {
-    const orders = await Order.find({ buyerId: req.user.userId })
-      .populate("productId", "title price category")
-      .sort({ createdAt: -1 });
+    const orders = await Order.find({
+      $or: [
+        { buyerId: req.user.userId },
+        { sellerId: req.user.userId },
+      ],
+    })
+      .populate("productId", "title price")
+      .populate("buyerId", "name")
+      .populate("sellerId", "name");
 
-    res.json(orders);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
+    res.status(200).json({ success: true, data: orders });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// Seller sold products
-const getSoldProducts = async (req, res) => {
+const cancelOrder = async (req, res) => {
+  const order = await Order.findById(req.params.id);
+
+  if (!order) {
+    return res.status(404).json({ message: "Order not found" });
+  }
+
+  if (order.status !== "PENDING") {
+    return res
+      .status(400)
+      .json({ message: "Only pending orders can be cancelled" });
+  }
+
+  // buyer or admin only
+  if (
+    order.buyerId.toString() !== req.user.userId &&
+    req.user.role !== "ADMIN"
+  ) {
+    return res.status(403).json({ message: "Not authorized" });
+  }
+
+  order.status = "CANCELLED";
+  await order.save();
+
+  res.json({ success: true, message: "Order cancelled" });
+};
+
+// GET ALL ORDERS 
+const getAllOrders = async (req, res) => {
   try {
-    const orders = await Order.find({ sellerId: req.user.userId })
-      .populate("productId", "title price category")
+    const orders = await Order.find()
+      .populate("productId", "title price")
       .populate("buyerId", "name email")
+      .populate("sellerId", "name email")
       .sort({ createdAt: -1 });
 
-    res.json(orders);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
+    res.status(200).json({
+      success: true,
+      total: orders.length,
+      data: orders,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
-module.exports = { createWalletOrder, getMyOrders, getSoldProducts };
+
+
+module.exports = {
+  createOrder,
+  getMyOrders,
+  cancelOrder,
+  getAllOrders
+};
