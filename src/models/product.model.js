@@ -23,6 +23,8 @@ const productSchema = new mongoose.Schema(
       required: true,
     },
     title: String,
+    brand: String,
+    model: { type: String, required: true },
     description: String,
     price: { type: Number, required: true },
 
