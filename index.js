@@ -54,5 +54,5 @@ app.use("/api/payment", require("./src/routes/payment.routes"));
 app.use("/api/chat", require("./src/routes/chat.routes"));
 app.use("/api/withdrawals", require("./src/routes/withdrawal.routes"));
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
