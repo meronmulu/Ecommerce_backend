@@ -1,39 +1,22 @@
 const jwt = require("jsonwebtoken");
-require("dotenv").config();
 
-// AUTHENTICATE USER
 const authenticateUser = (req, res, next) => {
-  const authHeader = req.headers.authorization;
-
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return res.status(401).json({
-      success: false,
-      message: "Access denied. No token provided.",
-    });
-  }
-
-  const token = authHeader.split(" ")[1];
+  const token = req.headers.authorization?.split(" ")[1];
+  if (!token) return res.status(401).json({ message: "No token" });
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.user = decoded; // { userId, role }
     next();
   } catch (error) {
-    return res.status(401).json({
-      success: false,
-      message: "Invalid or expired token.",
-    });
+    res.status(401).json({ message: "Invalid token" });
   }
 };
 
-// AUTHORIZE ROLES
-const authorizeRoles = (...allowedRoles) => {
+const authorizeRoles = (...roles) => {
   return (req, res, next) => {
-    if (!req.user || !allowedRoles.includes(req.user.role)) {
-      return res.status(403).json({
-        success: false,
-        message: "Access denied. You do not have permission.",
-      });
+    if (!roles.includes(req.user.role)) {
+      return res.status(403).json({ message: "Access denied" });
     }
     next();
   };

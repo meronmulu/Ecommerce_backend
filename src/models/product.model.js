@@ -10,51 +10,43 @@ const productSchema = new mongoose.Schema(
 
     category: {
       type: String,
-      enum: ["Mobile", "Tablet", "PC"],
-      required: true,
-    },
-
-    title: {
-      type: String,
-      required: true,
+      enum: ["mobile", "tablet", "laptop"],
+      lowercase: true,
       trim: true,
-    },
-
-    description: String,
-
-    price: {
-      type: Number,
       required: true,
-      min: 0,
     },
-
     condition: {
       type: String,
-      enum: ["NEW", "USED"],
+      enum: ["new", "like new", "used", "defective"],
+      lowercase: true,
+      trim: true,
       required: true,
     },
+    title: String,
+    description: String,
+    price: { type: Number, required: true },
 
-    brand: String,
-    model: String,
-
-    specifications: {
-      type: Map,
-      of: String,
-      default: {},
-    },
-
+    // 3 Images: Front, Back, Info
     images: {
       type: [String],
-      default: [],
+      required: true,
+      validate: {
+        validator: (v) => v.length === 3,
+        message: "Exactly 3 images required (Front, Back, Info)",
+      },
     },
 
     status: {
       type: String,
-      enum: ["ACTIVE", "SOLD", "BLOCKED"],
+      enum: ["ACTIVE", "SOLD", "HIDDEN"],
       default: "ACTIVE",
     },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
+
+function arrayLimit(val) {
+  return val.length >= 0;
+} // Logic handled in controller
 
 module.exports = mongoose.model("Product", productSchema);
