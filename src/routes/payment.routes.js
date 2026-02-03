@@ -1,10 +1,11 @@
 const express = require("express");
-const { initPayment, chapaCallback } = require("../controller/payment.controller.js");
-const { authenticateUser } = require("../middlewares/authMiddleware.js");
-
 const router = express.Router();
+const {
+  initPayment,
+  chapaCallback,
+} = require("../controller/payment.controller");
+const { authenticateUser } = require("../middlewares/authMiddleware");
 
-router.post("/init", authenticateUser, initPayment); // Only logged-in users
-router.post("/callback", chapaCallback); // Chapa calls this
-
+router.post("/init", authenticateUser, initPayment);
+router.post("/callback", chapaCallback);
 module.exports = router;

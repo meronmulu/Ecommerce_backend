@@ -1,21 +1,37 @@
 const express = require("express");
-const {createUser,loginUser,getAllUsers,getUserById,updateUser,deleteUser,} = require("../controller/user.controller");
-
-const {authenticateUser,authorizeRoles,} = require("../middlewares/authMiddleware");
-
 const router = express.Router();
+const upload = require("../middlewares/upload");
+const {
+  createUser,
+  verifyOtp,
+  loginUser,
+  requestVerification,
+  adminVerifyUser,
+  getUserProfile,
+} = require("../controller/user.controller");
+const {
+  authenticateUser,
+  authorizeRoles,
+} = require("../middlewares/authMiddleware");
 
-// 🔐 AUTH
+// Auth
 router.post("/register", createUser);
+router.post("/verify-otp", verifyOtp);
 router.post("/login", loginUser);
+router.get("/me", authenticateUser, getUserProfile);
 
-// 👤 USERS (ADMIN only)
-router.get("/",authenticateUser,authorizeRoles("ADMIN"),getAllUsers);
-
-router.get("/:id",authenticateUser,authorizeRoles("ADMIN"),getUserById);
-
-router.put("/:id",authenticateUser,authorizeRoles("ADMIN"),updateUser);
-
-router.delete("/:id",deleteUser);
+// Blue Badge (KYC)
+router.post(
+  "/request-verification",
+  authenticateUser,
+  upload.single("nationalId"),
+  requestVerification,
+);
+router.put(
+  "/admin/verify-action",
+  authenticateUser,
+  authorizeRoles("ADMIN"),
+  adminVerifyUser,
+);
 
 module.exports = router;
