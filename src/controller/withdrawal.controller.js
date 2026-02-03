@@ -1,47 +1,22 @@
 const Withdrawal = require("../models/withdrawal.model");
 const User = require("../models/user.model");
 
-// SELLER REQUEST WITHDRAWAL
 const requestWithdrawal = async (req, res) => {
-  try {
-    const { amount, bankName, accountNumber } = req.body;
+  const { amount, bankName, accountNumber } = req.body;
+  // ATOMIC DEDUCTION: Only deduct if balance >= amount
+  const user = await User.findOneAndUpdate(
+    { _id: req.user.userId, walletBalance: { $gte: amount } },
+    { $inc: { walletBalance: -amount } },
+    { new: true },
+  );
+  if (!user) return res.status(400).json({ message: "Insufficient Funds" });
 
-    const user = await User.findById(req.user.userId);
-
-    if (user.walletBalance < amount) {
-      return res.status(400).json({ message: "Insufficient wallet balance" });
-    }
-
-    const withdrawal = await Withdrawal.create({
-      sellerId: user._id,
-      amount,
-      bankName,
-      accountNumber,
-    });
-
-    // deduct immediately (lock funds)
-    user.walletBalance -= amount;
-    await user.save();
-
-    res.status(201).json({
-      success: true,
-      message: "Withdrawal request sent",
-      data: withdrawal,
-    });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
+  const w = await Withdrawal.create({
+    sellerId: user._id,
+    amount,
+    bankName,
+    accountNumber,
+  });
+  res.status(201).json({ success: true, data: w });
 };
-
-// ADMIN APPROVE
-// const approveWithdrawal = async (req, res) => {
-//   const withdrawal = await Withdrawal.findById(req.params.id);
-//   if (!withdrawal) return res.status(404).json({ message: "Not found" });
-
-//   withdrawal.status = "APPROVED";
-//   await withdrawal.save();
-
-//   res.json({ success: true, message: "Withdrawal approved" });
-// };
-
 module.exports = { requestWithdrawal };

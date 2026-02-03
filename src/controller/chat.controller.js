@@ -4,17 +4,30 @@ const Message = require("../models/chat.model");
 const sendMessage = async (req, res) => {
   try {
     const { receiverId, productId, message } = req.body;
+    const senderId = req.user.userId;
 
     if (!receiverId || !message) {
-      return res.status(400).json({ success: false, message: "receiverId and message are required" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Missing fields" });
     }
 
+    // 1. Save to Database
     const msg = await Message.create({
-      senderId: req.user.userId,
+      senderId,
       receiverId,
       productId,
       message,
     });
+
+    // 2. SOCKET EMIT (Real-time)
+    const io = req.app.get("socketio");
+
+    // Emit to the Receiver's private room
+    io.to(receiverId).emit("receive_message", msg);
+
+    // Also emit to Sender (optional, useful if they have multiple devices open)
+    // io.to(senderId).emit("receive_message", msg);
 
     res.status(201).json({ success: true, data: msg });
   } catch (error) {
@@ -22,18 +35,12 @@ const sendMessage = async (req, res) => {
   }
 };
 
-// GET CHAT BETWEEN LOGGED-IN USER AND RECEIVER
+// GET CHAT (No changes needed here, this loads history)
 const getChat = async (req, res) => {
   try {
     const { receiverId, productId } = req.params;
-
-    if (!receiverId) {
-      return res.status(400).json({ success: false, message: "receiverId is required" });
-    }
-
-    // Fetch messages where either sender/receiver matches
     const messages = await Message.find({
-      productId: productId || null, // optional filter by product
+      productId: productId || null,
       $or: [
         { senderId: req.user.userId, receiverId },
         { senderId: receiverId, receiverId: req.user.userId },

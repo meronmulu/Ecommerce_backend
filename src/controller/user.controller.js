@@ -2,190 +2,126 @@ const User = require("../models/user.model");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 
-// CREATE USER (REGISTER)
+// 1. REGISTER + OTP GENERATION
 const createUser = async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, phone, password } = req.body;
+    if (await User.findOne({ email }))
+      return res.status(400).json({ message: "Email exists" });
 
-    // basic validation
-    if (!name || !email || !password) {
-      return res.status(400).json({
-        success: false,
-        message: "Name, email and password are required",
-      });
-    }
-
-    // check email
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(400).json({
-        success: false,
-        message: "Email already registered",
-      });
-    }
-
-    // hash password
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    // FIRST USER = ADMIN
-    const userCount = await User.countDocuments();
-    const role = userCount === 0 ? "ADMIN" : "USER";
-
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const user = await User.create({
       name,
       email,
-      password: hashedPassword,
-      role,
+      phone,
+      password: await bcrypt.hash(password, 10),
+      otp,
+      otpExpires: Date.now() + 600000, // 10 mins
     });
 
-   
-
+    console.log(`>>> MOCK SMS to ${phone}: OTP is ${otp} <<<`);
     res.status(201).json({
       success: true,
-      message:
-        role === "ADMIN"
-          ? "Admin account created successfully"
-          : "User registered successfully",
-      data: user,
+      message: "Registered. Check console for OTP.",
+      userId: user._id,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    res.status(500).json({ message: error.message });
   }
 };
 
-// LOGIN
-const loginUser = async (req, res) => {
+// 2. VERIFY PHONE OTP
+const verifyOtp = async (req, res) => {
   try {
-    const { email, password } = req.body;
-
-    const user = await User.findOne({ email });
-    if (!user) {
-      return res
-        .status(401)
-        .json({ success: false, message: "User not found" });
+    const { userId, otp } = req.body;
+    const user = await User.findById(userId);
+    if (!user || user.otp !== otp || user.otpExpires < Date.now()) {
+      return res.status(400).json({ message: "Invalid OTP" });
     }
-
-    const isPasswordValid = await bcrypt.compare(password, user.password);
-    if (!isPasswordValid) {
-      return res
-        .status(401)
-        .json({ success: false, message: "Invalid password" });
-    }
+    user.isPhoneVerified = true;
+    user.otp = undefined;
+    await user.save();
 
     const token = jwt.sign(
       { userId: user._id, role: user.role },
       process.env.JWT_SECRET,
-      { expiresIn: "7d" }
+      { expiresIn: "7d" },
     );
-
-    res.status(200).json({
-      success: true,
-      message: "Login successful",
-      token,
-      user,
-    });
+    res.json({ success: true, token, user });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ message: error.message });
   }
 };
 
-// GET ALL USERS
-const getAllUsers = async (req, res) => {
+// 3. LOGIN
+const loginUser = async (req, res) => {
   try {
-    const users = await User.find();
-    res.status(200).json({
-      success: true,
-      message: "All users fetched successfully",
-      data: users,
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
+    const { email, password } = req.body;
+    const user = await User.findOne({ email });
+    if (!user || !(await bcrypt.compare(password, user.password)))
+      return res.status(401).json({ message: "Invalid credentials" });
 
-// GET USER BY ID
-const getUserById = async (req, res) => {
-  try {
-    const user = await User.findById(req.params.id);
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
-    }
-
-    res.status(200).json({
-      success: true,
-      message: "User retrieved successfully",
-      data: user,
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
-
-// UPDATE USER
-const updateUser = async (req, res) => {
-  try {
-    const data = req.body;
-
-    if (data.password) {
-      data.password = await bcrypt.hash(data.password, 10);
-    }
-
-    const updatedUser = await User.findByIdAndUpdate(
-      req.params.id,
-      data,
-      { new: true }
+    const token = jwt.sign(
+      { userId: user._id, role: user.role },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" },
     );
-
-    if (!updatedUser) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
-    }
-
-    res.status(200).json({
-      success: true,
-      message: "User updated successfully",
-      data: updatedUser,
-    });
+    res.json({ success: true, token, user });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ message: error.message });
   }
 };
 
-// DELETE USER
-const deleteUser = async (req, res) => {
+// 4. REQUEST BLUE BADGE (Upload ID)
+const requestVerification = async (req, res) => {
   try {
-    const deletedUser = await User.findByIdAndDelete(req.params.id);
+    if (!req.file)
+      return res.status(400).json({ message: "ID Image required" });
+    const user = await User.findById(req.user.userId);
 
-    if (!deletedUser) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
-    }
+    if (user.role === "VERIFIED_SELLER")
+      return res.status(400).json({ message: "Already verified" });
 
-    res.status(200).json({
-      success: true,
-      message: "User deleted successfully",
-    });
+    user.kyc.status = "PENDING";
+    user.kyc.idImage = req.file.path;
+    user.kyc.submittedAt = Date.now();
+    await user.save();
+    res.json({ success: true, message: "Request sent to Admin." });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ message: error.message });
   }
+};
+
+// 5. ADMIN APPROVES BLUE BADGE
+const adminVerifyUser = async (req, res) => {
+  try {
+    const { userId, status } = req.body; // "APPROVED" or "REJECTED"
+    const user = await User.findById(userId);
+
+    if (status === "APPROVED") {
+      user.kyc.status = "APPROVED";
+      user.role = "VERIFIED_SELLER"; // Grants Blue Badge
+    } else {
+      user.kyc.status = "REJECTED";
+    }
+    await user.save();
+    res.json({ success: true, message: `User is now ${user.role}` });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// Get User Profile
+const getUserProfile = async (req, res) => {
+  const user = await User.findById(req.user.userId).select("-password -otp");
+  res.json({ success: true, data: user });
 };
 
 module.exports = {
   createUser,
+  verifyOtp,
   loginUser,
-  getAllUsers,
-  getUserById,
-  updateUser,
-  deleteUser,
+  requestVerification,
+  adminVerifyUser,
+  getUserProfile,
 };
