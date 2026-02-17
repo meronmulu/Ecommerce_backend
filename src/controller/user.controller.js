@@ -1,121 +1,414 @@
 const User = require("../models/user.model");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
+
+// Utility function to generate OTP
+const generateOTP = () => {
+  return crypto.randomInt(100000, 999999).toString();
+};
+
+// Utility function to generate JWT
+const generateToken = (userId, role) => {
+  return jwt.sign({ userId, role }, process.env.JWT_SECRET, {
+    expiresIn: process.env.JWT_EXPIRES_IN || "7d",
+  });
+};
+
+// Utility function to handle async errors
+const asyncHandler = (fn) => (req, res, next) => {
+  Promise.resolve(fn(req, res, next)).catch(next);
+};
 
 // 1. REGISTER + OTP GENERATION
-const createUser = async (req, res) => {
-  try {
-    const { name, email, phone, password } = req.body;
-    if (await User.findOne({ email }))
-      return res.status(400).json({ message: "Email exists" });
+const createUser = asyncHandler(async (req, res) => {
+  const { name, email, phone, password } = req.body;
 
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const user = await User.create({
-      name,
-      email,
-      phone,
-      password: await bcrypt.hash(password, 10),
-      otp,
-      otpExpires: Date.now() + 600000, // 10 mins
-    });
+  // Check if user exists
+  const existingUser = await User.findOne({
+    $or: [{ email }, { phone }],
+  });
 
-    console.log(`>>> MOCK SMS to ${phone}: OTP is ${otp} <<<`);
-    res.status(201).json({
-      success: true,
-      message: "Registered. Check console for OTP.",
-      userId: user._id,
-    });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
+  if (existingUser) {
+    if (existingUser.email === email) {
+      return res.status(400).json({
+        success: false,
+        message: "Email already registered",
+      });
+    }
+    if (existingUser.phone === phone) {
+      return res.status(400).json({
+        success: false,
+        message: "Phone number already registered",
+      });
+    }
   }
-};
+
+  const otp = generateOTP();
+  const hashedPassword = await bcrypt.hash(password, 12);
+
+  const user = await User.create({
+    name,
+    email: email.toLowerCase(),
+    phone,
+    password: hashedPassword,
+    otp,
+    otpExpires: Date.now() + 10 * 60 * 1000, // 10 minutes
+  });
+
+  // TODO: Integrate actual SMS service
+  console.log(`\n📱 MOCK SMS to ${phone}: Your OTP is ${otp}\n`);
+
+  res.status(201).json({
+    success: true,
+    message: "Registration successful. Please verify your phone with OTP.",
+    userId: user._id,
+  });
+});
 
 // 2. VERIFY PHONE OTP
-const verifyOtp = async (req, res) => {
-  try {
-    const { userId, otp } = req.body;
-    const user = await User.findById(userId);
-    if (!user || user.otp !== otp || user.otpExpires < Date.now()) {
-      return res.status(400).json({ message: "Invalid OTP" });
+const verifyOtp = asyncHandler(async (req, res) => {
+  const { userId, otp } = req.body;
+
+  const user = await User.findById(userId).select("+otp +otpExpires");
+
+  if (!user) {
+    return res.status(404).json({
+      success: false,
+      message: "User not found",
+    });
+  }
+
+  if (!user.otp || !user.otpExpires || user.otpExpires < Date.now()) {
+    return res.status(400).json({
+      success: false,
+      message: "OTP has expired. Please request a new one.",
+    });
+  }
+
+  if (user.otp !== otp) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid OTP",
+    });
+  }
+
+  // Update user
+  user.isPhoneVerified = true;
+  user.otp = undefined;
+  user.otpExpires = undefined;
+  user.lastLoginAt = new Date();
+  await user.save();
+
+  const token = generateToken(user._id, user.role);
+
+  res.json({
+    success: true,
+    message: "Phone verified successfully",
+    token,
+    user,
+  });
+});
+
+// 3. LOGIN with rate limiting
+const loginUser = asyncHandler(async (req, res) => {
+  const { email, password } = req.body;
+
+  const user = await User.findOne({ email: email.toLowerCase() }).select(
+    "+password +loginAttempts +lockUntil",
+  );
+
+  if (!user) {
+    return res.status(401).json({
+      success: false,
+      message: "Invalid email or password",
+    });
+  }
+
+  // Check if account is locked
+  if (user.lockUntil && user.lockUntil > Date.now()) {
+    const remainingTime = Math.ceil((user.lockUntil - Date.now()) / 60000);
+    return res.status(429).json({
+      success: false,
+      message: `Too many failed attempts. Try again in ${remainingTime} minutes`,
+    });
+  }
+
+  const isPasswordValid = await bcrypt.compare(password, user.password);
+
+  if (!isPasswordValid) {
+    // Increment login attempts
+    user.loginAttempts = (user.loginAttempts || 0) + 1;
+
+    // Lock account after 5 failed attempts
+    if (user.loginAttempts >= 5) {
+      user.lockUntil = Date.now() + 30 * 60 * 1000; // Lock for 30 minutes
     }
-    user.isPhoneVerified = true;
-    user.otp = undefined;
+
     await user.save();
 
-    const token = jwt.sign(
-      { userId: user._id, role: user.role },
-      process.env.JWT_SECRET,
-      { expiresIn: "7d" },
-    );
-    res.json({ success: true, token, user });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
+    return res.status(401).json({
+      success: false,
+      message: "Invalid email or password",
+    });
   }
-};
 
-// 3. LOGIN
-const loginUser = async (req, res) => {
-  try {
-    const { email, password } = req.body;
-    const user = await User.findOne({ email });
-    if (!user || !(await bcrypt.compare(password, user.password)))
-      return res.status(401).json({ message: "Invalid credentials" });
+  // Reset login attempts on successful login
+  user.loginAttempts = 0;
+  user.lockUntil = undefined;
+  user.lastLoginAt = new Date();
+  await user.save();
 
-    const token = jwt.sign(
-      { userId: user._id, role: user.role },
-      process.env.JWT_SECRET,
-      { expiresIn: "7d" },
-    );
-    res.json({ success: true, token, user });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
+  const token = generateToken(user._id, user.role);
+
+  res.json({
+    success: true,
+    message: "Login successful",
+    token,
+    user,
+  });
+});
+
+// 4. REQUEST VERIFICATION (Upload ID)
+const requestVerification = asyncHandler(async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({
+      success: false,
+      message: "ID image is required",
+    });
   }
-};
 
-// 4. REQUEST BLUE BADGE (Upload ID)
-const requestVerification = async (req, res) => {
-  try {
-    if (!req.file)
-      return res.status(400).json({ message: "ID Image required" });
-    const user = await User.findById(req.user.userId);
+  const user = await User.findById(req.user.userId);
 
-    if (user.role === "VERIFIED_SELLER")
-      return res.status(400).json({ message: "Already verified" });
-
-    user.kyc.status = "PENDING";
-    user.kyc.idImage = req.file.path;
-    user.kyc.submittedAt = Date.now();
-    await user.save();
-    res.json({ success: true, message: "Request sent to Admin." });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
-
-// 5. ADMIN APPROVES BLUE BADGE
-const adminVerifyUser = async (req, res) => {
-  try {
-    const { userId, status } = req.body; // "APPROVED" or "REJECTED"
-    const user = await User.findById(userId);
-
-    if (status === "APPROVED") {
-      user.kyc.status = "APPROVED";
-      user.role = "VERIFIED_SELLER"; // Grants Blue Badge
-    } else {
-      user.kyc.status = "REJECTED";
+  if (!user.canRequestVerification()) {
+    if (user.role === "VERIFIED_SELLER") {
+      return res.status(400).json({
+        success: false,
+        message: "You are already verified",
+      });
     }
-    await user.save();
-    res.json({ success: true, message: `User is now ${user.role}` });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
+    if (user.kyc.status === "PENDING") {
+      return res.status(400).json({
+        success: false,
+        message: "You already have a pending verification request",
+      });
+    }
   }
-};
 
-// Get User Profile
-const getUserProfile = async (req, res) => {
-  const user = await User.findById(req.user.userId).select("-password -otp");
-  res.json({ success: true, data: user });
-};
+  user.kyc = {
+    status: "PENDING",
+    idImage: req.file.path,
+    submittedAt: new Date(),
+  };
+
+  await user.save();
+
+  res.json({
+    success: true,
+    message:
+      "Verification request submitted successfully. Admin will review your ID.",
+  });
+});
+
+// 5. ADMIN VERIFIES USER
+const adminVerifyUser = asyncHandler(async (req, res) => {
+  const { userId, status, rejectionReason } = req.body; // status: "APPROVED" or "REJECTED"
+
+  if (!["APPROVED", "REJECTED"].includes(status)) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid status. Must be APPROVED or REJECTED",
+    });
+  }
+
+  const user = await User.findById(userId);
+
+  if (!user) {
+    return res.status(404).json({
+      success: false,
+      message: "User not found",
+    });
+  }
+
+  if (user.kyc.status !== "PENDING") {
+    return res.status(400).json({
+      success: false,
+      message: "No pending verification request for this user",
+    });
+  }
+
+  user.kyc.status = status;
+  user.kyc.reviewedAt = new Date();
+  user.kyc.reviewedBy = req.user.userId;
+
+  if (status === "APPROVED") {
+    user.role = "VERIFIED_SELLER";
+  } else if (rejectionReason) {
+    user.kyc.rejectionReason = rejectionReason;
+  }
+
+  await user.save();
+
+  res.json({
+    success: true,
+    message:
+      status === "APPROVED"
+        ? "User has been verified as a seller"
+        : "Verification request rejected",
+  });
+});
+
+// 6. GET USER PROFILE
+const getUserProfile = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user.userId);
+
+  if (!user) {
+    return res.status(404).json({
+      success: false,
+      message: "User not found",
+    });
+  }
+
+  res.json({
+    success: true,
+    data: user,
+  });
+});
+
+// 7. UPDATE USER PROFILE
+const updateProfile = asyncHandler(async (req, res) => {
+  const { name, phone } = req.body;
+  const updates = {};
+
+  if (name) updates.name = name;
+  if (phone) {
+    // Check if phone is already taken
+    const existingUser = await User.findOne({
+      phone,
+      _id: { $ne: req.user.userId },
+    });
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        message: "Phone number already in use",
+      });
+    }
+    updates.phone = phone;
+  }
+
+  const user = await User.findByIdAndUpdate(req.user.userId, updates, {
+    new: true,
+    runValidators: true,
+  });
+
+  res.json({
+    success: true,
+    message: "Profile updated successfully",
+    data: user,
+  });
+});
+
+// 8. CHANGE PASSWORD
+const changePassword = asyncHandler(async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+
+  const user = await User.findById(req.user.userId).select("+password");
+
+  const isPasswordValid = await bcrypt.compare(currentPassword, user.password);
+
+  if (!isPasswordValid) {
+    return res.status(401).json({
+      success: false,
+      message: "Current password is incorrect",
+    });
+  }
+
+  user.password = await bcrypt.hash(newPassword, 12);
+  await user.save();
+
+  res.json({
+    success: true,
+    message: "Password changed successfully",
+  });
+});
+
+// 9. FORGOT PASSWORD (Request reset)
+const forgotPassword = asyncHandler(async (req, res) => {
+  const { email } = req.body;
+
+  const user = await User.findOne({ email: email.toLowerCase() });
+
+  if (!user) {
+    // Don't reveal if user exists or not for security
+    return res.json({
+      success: true,
+      message:
+        "If your email is registered, you will receive a password reset link",
+    });
+  }
+
+  // Generate reset token
+  const resetToken = crypto.randomBytes(32).toString("hex");
+  const resetTokenHash = await bcrypt.hash(resetToken, 10);
+
+  user.resetPasswordToken = resetTokenHash;
+  user.resetPasswordExpires = Date.now() + 60 * 60 * 1000; // 1 hour
+  await user.save();
+
+  // TODO: Send email with reset link
+  console.log(
+    `\n📧 PASSWORD RESET LINK: http://localhost:3000/reset-password?token=${resetToken}&userId=${user._id}\n`,
+  );
+
+  res.json({
+    success: true,
+    message:
+      "If your email is registered, you will receive a password reset link",
+  });
+});
+
+// 10. RESET PASSWORD
+const resetPassword = asyncHandler(async (req, res) => {
+  const { userId, token, newPassword } = req.body;
+
+  const user = await User.findById(userId).select(
+    "+resetPasswordToken +resetPasswordExpires",
+  );
+
+  if (!user || !user.resetPasswordToken || !user.resetPasswordExpires) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid or expired reset token",
+    });
+  }
+
+  if (user.resetPasswordExpires < Date.now()) {
+    return res.status(400).json({
+      success: false,
+      message: "Reset token has expired",
+    });
+  }
+
+  const isValidToken = await bcrypt.compare(token, user.resetPasswordToken);
+
+  if (!isValidToken) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid reset token",
+    });
+  }
+
+  user.password = await bcrypt.hash(newPassword, 12);
+  user.resetPasswordToken = undefined;
+  user.resetPasswordExpires = undefined;
+  await user.save();
+
+  res.json({
+    success: true,
+    message:
+      "Password reset successful. You can now login with your new password.",
+  });
+});
 
 module.exports = {
   createUser,
@@ -124,4 +417,8 @@ module.exports = {
   requestVerification,
   adminVerifyUser,
   getUserProfile,
+  updateProfile,
+  changePassword,
+  forgotPassword,
+  resetPassword,
 };
