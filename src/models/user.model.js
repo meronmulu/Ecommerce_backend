@@ -1,3 +1,5 @@
+// server/models/user.model.js
+
 const mongoose = require("mongoose");
 
 const kycSchema = new mongoose.Schema(
@@ -36,37 +38,38 @@ const userSchema = new mongoose.Schema(
         "Please enter a valid email",
       ],
     },
-    phone: {
-      type: String,
-      required: [true, "Phone number is required"],
-      match: [/^[0-9]{10}$/, "Please enter a valid 10-digit phone number"],
-    },
     password: {
       type: String,
       required: [true, "Password is required"],
       minlength: [6, "Password must be at least 6 characters"],
-      select: false, // Don't return password by default
+      select: false,
+    },
+
+    // Email Verification (instead of phone)
+    isEmailVerified: { type: Boolean, default: false, index: true },
+    emailOTP: {
+      type: String,
+      select: false,
+    },
+    emailOTPExpires: {
+      type: Date,
+      select: false,
+    },
+
+    // Phone (optional now)
+    phone: {
+      type: String,
+      required: false,
     },
 
     role: {
       type: String,
       enum: ["USER", "VERIFIED_SELLER", "ADMIN"],
       default: "USER",
-      index: true, // Add index for faster queries
+      index: true,
     },
 
-    // Phone Verification
-    isPhoneVerified: { type: Boolean, default: false, index: true },
-    otp: {
-      type: String,
-      select: false, // Don't return OTP by default
-    },
-    otpExpires: {
-      type: Date,
-      select: false, // Don't return by default
-    },
-
-    // ID Verification (KYC)
+    // KYC for ID Verification
     kyc: {
       type: kycSchema,
       default: () => ({}),
@@ -77,23 +80,17 @@ const userSchema = new mongoose.Schema(
       type: Number,
       default: 0,
       min: [0, "Wallet balance cannot be negative"],
-      get: (v) => Math.round(v * 100) / 100, // Round to 2 decimal places
+      get: (v) => Math.round(v * 100) / 100,
       set: (v) => Math.round(v * 100) / 100,
     },
 
-    // Device tokens for push notifications
-    deviceTokens: [
-      {
-        type: String,
-        select: false,
-      },
-    ],
-
-    // Account status
+    // Security fields
     isActive: { type: Boolean, default: true, index: true },
     lastLoginAt: { type: Date },
     loginAttempts: { type: Number, default: 0, select: false },
     lockUntil: { type: Date, select: false },
+    resetPasswordToken: { type: String, select: false },
+    resetPasswordExpires: { type: Date, select: false },
   },
   {
     timestamps: true,
@@ -102,29 +99,23 @@ const userSchema = new mongoose.Schema(
       getters: true,
       transform: (doc, ret) => {
         delete ret.password;
-        delete ret.otp;
-        delete ret.otpExpires;
+        delete ret.emailOTP;
+        delete ret.emailOTPExpires;
+        delete ret.resetPasswordToken;
+        delete ret.resetPasswordExpires;
         delete ret.__v;
-        delete ret.deviceTokens;
         delete ret.loginAttempts;
         delete ret.lockUntil;
         return ret;
       },
     },
-    toObject: { getters: true },
   },
 );
 
 // Indexes for better query performance
 userSchema.index({ email: 1 });
-userSchema.index({ phone: 1 });
-userSchema.index({ role: 1, isPhoneVerified: 1 });
+userSchema.index({ role: 1, isEmailVerified: 1 });
 userSchema.index({ "kyc.status": 1 });
-
-// Virtual for full profile URL
-userSchema.virtual("profileImageUrl").get(function () {
-  return this.profileImage ? `/uploads/users/${this.profileImage}` : null;
-});
 
 // Method to check if user is verified seller
 userSchema.methods.isVerifiedSeller = function () {
@@ -133,7 +124,7 @@ userSchema.methods.isVerifiedSeller = function () {
 
 // Method to check if user can sell
 userSchema.methods.canSell = function () {
-  return this.isPhoneVerified && this.isActive;
+  return this.isEmailVerified && this.isActive;
 };
 
 // Method to check if user can request verification
@@ -143,14 +134,6 @@ userSchema.methods.canRequestVerification = function () {
     this.kyc.status !== "PENDING" &&
     this.isActive
   );
-};
-
-// Static method to find active verified sellers
-userSchema.statics.findVerifiedSellers = function () {
-  return this.find({
-    role: "VERIFIED_SELLER",
-    isActive: true,
-  }).select("name email phone kyc.submittedAt");
 };
 
 module.exports = mongoose.model("User", userSchema);

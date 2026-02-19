@@ -1,9 +1,12 @@
+// server/routes/user.routes.js
+
 const express = require("express");
 const router = express.Router();
 const upload = require("../middlewares/upload");
 const {
   createUser,
-  verifyOtp,
+  verifyEmailOTP,
+  resendOTP,
   loginUser,
   requestVerification,
   adminVerifyUser,
@@ -21,7 +24,8 @@ const {
 
 // Public routes (no authentication required)
 router.post("/register", createUser);
-router.post("/verify-otp", verifyOtp);
+router.post("/verify-email", verifyEmailOTP); // Changed from verify-otp
+router.post("/resend-otp", resendOTP); // New endpoint
 router.post("/login", loginRateLimiter, loginUser);
 router.post("/forgot-password", forgotPassword);
 router.post("/reset-password", resetPassword);

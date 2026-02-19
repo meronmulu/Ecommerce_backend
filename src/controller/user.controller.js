@@ -1,12 +1,10 @@
+// server/controller/user.controller.js
+
 const User = require("../models/user.model");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
-
-// Utility function to generate OTP
-const generateOTP = () => {
-  return crypto.randomInt(100000, 999999).toString();
-};
+const EmailService = require("../services/emailService");
 
 // Utility function to generate JWT
 const generateToken = (userId, role) => {
@@ -20,57 +18,48 @@ const asyncHandler = (fn) => (req, res, next) => {
   Promise.resolve(fn(req, res, next)).catch(next);
 };
 
-// 1. REGISTER + OTP GENERATION
+// 1. REGISTER (Send OTP to email)
 const createUser = asyncHandler(async (req, res) => {
-  const { name, email, phone, password } = req.body;
+  const { name, email, password } = req.body;
 
   // Check if user exists
-  const existingUser = await User.findOne({
-    $or: [{ email }, { phone }],
-  });
-
+  const existingUser = await User.findOne({ email });
   if (existingUser) {
-    if (existingUser.email === email) {
-      return res.status(400).json({
-        success: false,
-        message: "Email already registered",
-      });
-    }
-    if (existingUser.phone === phone) {
-      return res.status(400).json({
-        success: false,
-        message: "Phone number already registered",
-      });
-    }
+    return res.status(400).json({
+      success: false,
+      message: "Email already registered",
+    });
   }
 
-  const otp = generateOTP();
+  // Generate OTP
+  const otp = EmailService.generateOTP();
   const hashedPassword = await bcrypt.hash(password, 12);
 
   const user = await User.create({
     name,
     email: email.toLowerCase(),
-    phone,
     password: hashedPassword,
-    otp,
-    otpExpires: Date.now() + 10 * 60 * 1000, // 10 minutes
+    emailOTP: otp,
+    emailOTPExpires: Date.now() + 10 * 60 * 1000, // 10 minutes
+    isEmailVerified: false,
   });
 
-  // TODO: Integrate actual SMS service
-  console.log(`\n📱 MOCK SMS to ${phone}: Your OTP is ${otp}\n`);
+  // Send OTP via email
+  await EmailService.sendOTPEmail(email, otp, name);
 
   res.status(201).json({
     success: true,
-    message: "Registration successful. Please verify your phone with OTP.",
+    message:
+      "Registration successful. Please check your email for verification code.",
     userId: user._id,
   });
 });
 
-// 2. VERIFY PHONE OTP
-const verifyOtp = asyncHandler(async (req, res) => {
+// 2. VERIFY EMAIL OTP
+const verifyEmailOTP = asyncHandler(async (req, res) => {
   const { userId, otp } = req.body;
 
-  const user = await User.findById(userId).select("+otp +otpExpires");
+  const user = await User.findById(userId).select("+emailOTP +emailOTPExpires");
 
   if (!user) {
     return res.status(404).json({
@@ -79,24 +68,23 @@ const verifyOtp = asyncHandler(async (req, res) => {
     });
   }
 
-  if (!user.otp || !user.otpExpires || user.otpExpires < Date.now()) {
-    return res.status(400).json({
-      success: false,
-      message: "OTP has expired. Please request a new one.",
-    });
-  }
+  const verification = EmailService.verifyOTP(
+    user.emailOTP,
+    user.emailOTPExpires,
+    otp,
+  );
 
-  if (user.otp !== otp) {
+  if (!verification.valid) {
     return res.status(400).json({
       success: false,
-      message: "Invalid OTP",
+      message: verification.message,
     });
   }
 
   // Update user
-  user.isPhoneVerified = true;
-  user.otp = undefined;
-  user.otpExpires = undefined;
+  user.isEmailVerified = true;
+  user.emailOTP = undefined;
+  user.emailOTPExpires = undefined;
   user.lastLoginAt = new Date();
   await user.save();
 
@@ -104,18 +92,54 @@ const verifyOtp = asyncHandler(async (req, res) => {
 
   res.json({
     success: true,
-    message: "Phone verified successfully",
+    message: "Email verified successfully",
     token,
     user,
   });
 });
 
-// 3. LOGIN with rate limiting
+// 3. RESEND OTP
+const resendOTP = asyncHandler(async (req, res) => {
+  const { email } = req.body;
+
+  const user = await User.findOne({ email: email.toLowerCase() });
+
+  if (!user) {
+    return res.status(404).json({
+      success: false,
+      message: "User not found",
+    });
+  }
+
+  if (user.isEmailVerified) {
+    return res.status(400).json({
+      success: false,
+      message: "Email already verified",
+    });
+  }
+
+  // Generate new OTP
+  const otp = EmailService.generateOTP();
+
+  user.emailOTP = otp;
+  user.emailOTPExpires = Date.now() + 10 * 60 * 1000;
+  await user.save();
+
+  // Send new OTP
+  await EmailService.sendOTPEmail(email, otp, user.name);
+
+  res.json({
+    success: true,
+    message: "New verification code sent to your email",
+  });
+});
+
+// 4. LOGIN with email verification check
 const loginUser = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
 
   const user = await User.findOne({ email: email.toLowerCase() }).select(
-    "+password +loginAttempts +lockUntil",
+    "+password +loginAttempts +lockUntil +isEmailVerified +emailOTP +emailOTPExpires",
   );
 
   if (!user) {
@@ -153,6 +177,25 @@ const loginUser = asyncHandler(async (req, res) => {
     });
   }
 
+  // Check if email is verified
+  if (!user.isEmailVerified) {
+    // Generate and send new OTP
+    const otp = EmailService.generateOTP();
+    user.emailOTP = otp;
+    user.emailOTPExpires = Date.now() + 10 * 60 * 1000;
+    await user.save();
+
+    await EmailService.sendOTPEmail(email, otp, user.name);
+
+    return res.status(403).json({
+      success: false,
+      message:
+        "Please verify your email first. A new verification code has been sent.",
+      requiresVerification: true,
+      userId: user._id,
+    });
+  }
+
   // Reset login attempts on successful login
   user.loginAttempts = 0;
   user.lockUntil = undefined;
@@ -169,7 +212,7 @@ const loginUser = asyncHandler(async (req, res) => {
   });
 });
 
-// 4. REQUEST VERIFICATION (Upload ID)
+// 5. REQUEST VERIFICATION (Upload ID)
 const requestVerification = asyncHandler(async (req, res) => {
   if (!req.file) {
     return res.status(400).json({
@@ -210,9 +253,9 @@ const requestVerification = asyncHandler(async (req, res) => {
   });
 });
 
-// 5. ADMIN VERIFIES USER
+// 6. ADMIN VERIFIES USER
 const adminVerifyUser = asyncHandler(async (req, res) => {
-  const { userId, status, rejectionReason } = req.body; // status: "APPROVED" or "REJECTED"
+  const { userId, status, rejectionReason } = req.body;
 
   if (!["APPROVED", "REJECTED"].includes(status)) {
     return res.status(400).json({
@@ -258,7 +301,7 @@ const adminVerifyUser = asyncHandler(async (req, res) => {
   });
 });
 
-// 6. GET USER PROFILE
+// 7. GET USER PROFILE
 const getUserProfile = asyncHandler(async (req, res) => {
   const user = await User.findById(req.user.userId);
 
@@ -275,7 +318,7 @@ const getUserProfile = asyncHandler(async (req, res) => {
   });
 });
 
-// 7. UPDATE USER PROFILE
+// 8. UPDATE USER PROFILE
 const updateProfile = asyncHandler(async (req, res) => {
   const { name, phone } = req.body;
   const updates = {};
@@ -308,7 +351,7 @@ const updateProfile = asyncHandler(async (req, res) => {
   });
 });
 
-// 8. CHANGE PASSWORD
+// 9. CHANGE PASSWORD
 const changePassword = asyncHandler(async (req, res) => {
   const { currentPassword, newPassword } = req.body;
 
@@ -332,7 +375,7 @@ const changePassword = asyncHandler(async (req, res) => {
   });
 });
 
-// 9. FORGOT PASSWORD (Request reset)
+// 10. FORGOT PASSWORD (Request reset)
 const forgotPassword = asyncHandler(async (req, res) => {
   const { email } = req.body;
 
@@ -355,7 +398,7 @@ const forgotPassword = asyncHandler(async (req, res) => {
   user.resetPasswordExpires = Date.now() + 60 * 60 * 1000; // 1 hour
   await user.save();
 
-  // TODO: Send email with reset link
+  // Send email with reset link (you can create a beautiful template for this too)
   console.log(
     `\n📧 PASSWORD RESET LINK: http://localhost:3000/reset-password?token=${resetToken}&userId=${user._id}\n`,
   );
@@ -367,7 +410,7 @@ const forgotPassword = asyncHandler(async (req, res) => {
   });
 });
 
-// 10. RESET PASSWORD
+// 11. RESET PASSWORD
 const resetPassword = asyncHandler(async (req, res) => {
   const { userId, token, newPassword } = req.body;
 
@@ -412,7 +455,8 @@ const resetPassword = asyncHandler(async (req, res) => {
 
 module.exports = {
   createUser,
-  verifyOtp,
+  verifyEmailOTP,
+  resendOTP,
   loginUser,
   requestVerification,
   adminVerifyUser,
