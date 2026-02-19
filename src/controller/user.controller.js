@@ -18,41 +18,61 @@ const asyncHandler = (fn) => (req, res, next) => {
   Promise.resolve(fn(req, res, next)).catch(next);
 };
 
-// 1. REGISTER (Send OTP to email)
+// 1. REGISTER
 const createUser = asyncHandler(async (req, res) => {
   const { name, email, password } = req.body;
+  const emailLower = email.toLowerCase();
 
   // Check if user exists
-  const existingUser = await User.findOne({ email });
+  const existingUser = await User.findOne({ email: emailLower });
+
   if (existingUser) {
-    return res.status(400).json({
-      success: false,
-      message: "Email already registered",
-    });
+    // SMART LOGIC: If user exists BUT is not verified, allow re-registration (overwrite)
+    if (!existingUser.isEmailVerified) {
+      await User.findByIdAndDelete(existingUser._id);
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "Email already registered and verified. Please login.",
+      });
+    }
   }
 
   // Generate OTP
   const otp = EmailService.generateOTP();
   const hashedPassword = await bcrypt.hash(password, 12);
 
+  // 1. Create User TEMPORARILY
   const user = await User.create({
     name,
-    email: email.toLowerCase(),
+    email: emailLower,
     password: hashedPassword,
     emailOTP: otp,
     emailOTPExpires: Date.now() + 10 * 60 * 1000, // 10 minutes
     isEmailVerified: false,
   });
 
-  // Send OTP via email
-  await EmailService.sendOTPEmail(email, otp, name);
+  try {
+    // 2. Try to send Email
+    await EmailService.sendOTPEmail(emailLower, otp, name);
 
-  res.status(201).json({
-    success: true,
-    message:
-      "Registration successful. Please check your email for verification code.",
-    userId: user._id,
-  });
+    res.status(201).json({
+      success: true,
+      message:
+        "Registration successful. Please check your email for verification code.",
+      userId: user._id,
+    });
+  } catch (error) {
+    // 3. IF EMAIL FAILS: Delete the user so they can try again!
+    await User.findByIdAndDelete(user._id);
+    console.error("Registration Email Failed:", error);
+
+    return res.status(500).json({
+      success: false,
+      message:
+        "Failed to send verification email. Please check your email address and try again.",
+    });
+  }
 });
 
 // 2. VERIFY EMAIL OTP
