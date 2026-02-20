@@ -18,62 +18,63 @@ const asyncHandler = (fn) => (req, res, next) => {
   Promise.resolve(fn(req, res, next)).catch(next);
 };
 
-// 1. REGISTER (Strict Production Logic)
+// 1. REGISTER
 const createUser = asyncHandler(async (req, res) => {
   const { name, email, password } = req.body;
   const emailLower = email.toLowerCase();
 
-  // --- CHECK EXISTING USER ---
+  // 1. Check existing user
   const existingUser = await User.findOne({ email: emailLower });
-
   if (existingUser) {
-    // Self-Healing: If user exists but NEVER verified, delete them so we can register again
+    // If not verified, delete old record to allow retry
     if (!existingUser.isEmailVerified) {
       await User.findByIdAndDelete(existingUser._id);
     } else {
       return res.status(400).json({
         success: false,
-        message: "Email already registered and verified. Please login.",
+        message: "Email already registered. Please login.",
       });
     }
   }
 
-  // --- PREPARE DATA ---
+  // 2. Generate Data
   const otp = EmailService.generateOTP();
   const hashedPassword = await bcrypt.hash(password, 12);
 
-  // --- CREATE USER (Temporary) ---
+  // 3. Create User
   const user = await User.create({
     name,
     email: emailLower,
     password: hashedPassword,
     emailOTP: otp,
-    emailOTPExpires: Date.now() + 10 * 60 * 1000, // 10 minutes
+    emailOTPExpires: Date.now() + 10 * 60 * 1000,
     isEmailVerified: false,
   });
 
   try {
-    // --- SEND EMAIL ---
+    // 4. Attempt Email Send
     await EmailService.sendOTPEmail(emailLower, otp, name);
 
-    // Success response
     res.status(201).json({
       success: true,
-      message:
-        "Registration successful. Please check your email for verification code.",
+      message: "Verification code sent to your email.",
       userId: user._id,
     });
   } catch (error) {
-    // --- ROLLBACK (CRITICAL) ---
-    // If email fails, we MUST delete the user so they aren't stuck
-    await User.findByIdAndDelete(user._id);
+    // 🛑 FAIL-SAFE FOR DEV MODE 🛑
+    // If email fails (network issue), DO NOT DELETE USER.
+    // Instead, print OTP to logs so you can copy-paste it.
 
-    console.error("🚨 Registration Rollback Triggered:", error.message);
+    console.log("------------------------------------------------");
+    console.log("⚠️ EMAIL FAILED, BUT USER CREATED (DEV MODE)");
+    console.log(`🔑 MANUAL OTP FOR ${emailLower}: ${otp}`);
+    console.log("------------------------------------------------");
 
-    return res.status(500).json({
-      success: false,
-      message:
-        "Could not send verification email. Please check your email address and try again.",
+    // Return SUCCESS to Flutter so the app navigates to OTP Screen
+    return res.status(201).json({
+      success: true,
+      message: "Dev Mode: Email failed. Check Server Logs for OTP.",
+      userId: user._id,
     });
   }
 });
@@ -81,15 +82,10 @@ const createUser = asyncHandler(async (req, res) => {
 // 2. VERIFY EMAIL OTP
 const verifyEmailOTP = asyncHandler(async (req, res) => {
   const { userId, otp } = req.body;
-
   const user = await User.findById(userId).select("+emailOTP +emailOTPExpires");
 
-  if (!user) {
-    return res.status(404).json({
-      success: false,
-      message: "User not found or registration expired. Please register again.",
-    });
-  }
+  if (!user)
+    return res.status(404).json({ success: false, message: "User not found." });
 
   const verification = EmailService.verifyOTP(
     user.emailOTP,
@@ -98,27 +94,34 @@ const verifyEmailOTP = asyncHandler(async (req, res) => {
   );
 
   if (!verification.valid) {
-    return res.status(400).json({
-      success: false,
-      message: verification.message,
-    });
+    return res
+      .status(400)
+      .json({ success: false, message: verification.message });
   }
 
-  // Update user
   user.isEmailVerified = true;
   user.emailOTP = undefined;
   user.emailOTPExpires = undefined;
-  user.lastLoginAt = new Date();
   await user.save();
 
   const token = generateToken(user._id, user.role);
+  res.json({ success: true, message: "Email verified!", token, user });
+});
 
-  res.json({
-    success: true,
-    message: "Email verified successfully",
-    token,
-    user,
-  });
+// Update user
+user.isEmailVerified = true;
+user.emailOTP = undefined;
+user.emailOTPExpires = undefined;
+user.lastLoginAt = new Date();
+await user.save();
+
+const token = generateToken(user._id, user.role);
+
+res.json({
+  success: true,
+  message: "Email verified successfully",
+  token,
+  user,
 });
 
 // 3. RESEND OTP

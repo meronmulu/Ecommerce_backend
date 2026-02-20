@@ -1,117 +1,76 @@
 // server/services/emailService.js
 
 const nodemailer = require("nodemailer");
+const dns = require("dns");
 require("dotenv").config();
+
+try {
+  dns.setDefaultResultOrder("ipv4first");
+} catch (e) {}
 
 class EmailService {
   constructor() {
     this.transporter = nodemailer.createTransport({
-      service: "gmail",
+      host: "smtp.gmail.com",
+      port: 465,
+      secure: true,
       family: 4,
       auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS,
       },
+      tls: {
+        rejectUnauthorized: false,
+      },
     });
   }
 
-  /**
-   * Generate a secure 6-digit OTP
-   */
   generateOTP() {
     return Math.floor(100000 + Math.random() * 900000).toString();
   }
 
-  /**
-   * Send OTP email to user with beautiful HTML template
-   */
   async sendOTPEmail(email, otp, userName = "User") {
     const mailOptions = {
       from: `"Used Tech Market" <${process.env.EMAIL_USER}>`,
       to: email,
-      subject: "🔐 Your Verification Code - Used Tech Market",
+      subject: "🔐 Your Verification Code",
       html: this.getEmailTemplate(otp, userName),
-      text: `Your verification code is: ${otp}. This code will expire in 10 minutes.`,
     };
 
     try {
-      // 1. Verify connection first
+      // Verify connection
       await this.transporter.verify();
-      console.log("✅ SMTP Connection Established via IPv4");
+      console.log("✅ SMTP Connection Established");
 
-      // 2. Send Email
       const info = await this.transporter.sendMail(mailOptions);
       console.log("📧 Email sent successfully:", info.messageId);
       return { success: true, messageId: info.messageId };
     } catch (error) {
-      console.error("❌ Email Sending Error:", error);
-      throw new Error(`Failed to send verification email: ${error.message}`);
+      console.error("❌ Email Fatal Error:", error.message);
+      // RE-THROW the error so the controller handles it
+      throw error;
     }
   }
 
-  /**
-   * Verify if OTP matches and is not expired
-   */
   verifyOTP(storedOTP, storedExpiry, userOTP) {
-    if (!storedOTP || !storedExpiry) {
-      return {
-        valid: false,
-        message: "No OTP found. Please request a new one.",
-      };
-    }
-
-    if (new Date() > new Date(storedExpiry)) {
-      return {
-        valid: false,
-        message: "OTP has expired. Please request a new one.",
-      };
-    }
-
-    if (storedOTP !== userOTP) {
-      return { valid: false, message: "Invalid OTP. Please try again." };
-    }
-
+    if (!storedOTP || !storedExpiry)
+      return { valid: false, message: "No OTP found." };
+    if (new Date() > new Date(storedExpiry))
+      return { valid: false, message: "OTP has expired." };
+    if (storedOTP !== userOTP) return { valid: false, message: "Invalid OTP." };
     return { valid: true, message: "OTP verified successfully" };
   }
 
-  /**
-   * HTML Template
-   */
   getEmailTemplate(otp, userName) {
     return `
-      <!DOCTYPE html>
-      <html lang="en">
-      <head>
-        <meta charset="UTF-8">
-        <style>
-          body { font-family: 'Arial', sans-serif; background-color: #f4f7fa; margin: 0; padding: 0; }
-          .container { max-width: 600px; margin: 20px auto; background: #ffffff; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
-          .header { background: #00838F; padding: 20px; text-align: center; color: white; }
-          .content { padding: 30px; text-align: center; }
-          .otp-box { background: #f0f8ff; border: 2px dashed #00838F; padding: 20px; font-size: 32px; font-weight: bold; color: #00838F; letter-spacing: 5px; margin: 20px 0; border-radius: 8px; }
-          .footer { background: #333; color: #ccc; padding: 15px; text-align: center; font-size: 12px; }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <div class="header">
-            <h1>Used Tech Market</h1>
-          </div>
-          <div class="content">
-            <h2>Hello, ${userName}!</h2>
-            <p>Thank you for registering. To verify your email address, please use the following code:</p>
-            
-            <div class="otp-box">${otp}</div>
-            
-            <p>This code is valid for <strong>10 minutes</strong>.</p>
-            <p>If you did not request this, please ignore this email.</p>
-          </div>
-          <div class="footer">
-            &copy; ${new Date().getFullYear()} Used Tech Market. Secure Trading.
-          </div>
+      <div style="font-family: Arial; padding: 20px; background: #f4f4f4;">
+        <div style="background: white; padding: 20px; border-radius: 10px; text-align: center;">
+          <h2 style="color: #00838F;">Used Tech Market</h2>
+          <p>Hello ${userName}, your verification code is:</p>
+          <h1 style="color: #00838F; letter-spacing: 5px; font-size: 40px;">${otp}</h1>
+          <p>Valid for 10 minutes.</p>
         </div>
-      </body>
-      </html>
+      </div>
     `;
   }
 }
