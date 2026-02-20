@@ -5,18 +5,13 @@ require("dotenv").config();
 
 class EmailService {
   constructor() {
-    // PRODUCTION CONFIG: SSL (Port 465)
+    // FIX: Use 'service: gmail' instead of manual ports.
+    // This automatically handles the connection negotiation.
     this.transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST || "smtp.gmail.com",
-      port: 465, // Force Secure SSL
-      secure: true, // true for 465, false for other ports
+      service: "gmail",
       auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS, // Your 16-char App Password
-      },
-      // Fix for some cloud environments blocking self-signed certs
-      tls: {
-        rejectUnauthorized: false,
       },
     });
   }
@@ -41,9 +36,9 @@ class EmailService {
     };
 
     try {
-      // 1. Verify connection first (Good for debugging)
+      // 1. Verify connection first
       await this.transporter.verify();
-      console.log("✅ SMTP Connection Established");
+      console.log("✅ SMTP Connection Established via Gmail Service");
 
       // 2. Send Email
       const info = await this.transporter.sendMail(mailOptions);
@@ -51,7 +46,6 @@ class EmailService {
       return { success: true, messageId: info.messageId };
     } catch (error) {
       console.error("❌ Email Sending Error:", error);
-      // Throw error so the Controller knows to delete the user
       throw new Error(`Failed to send verification email: ${error.message}`);
     }
   }
