@@ -61,10 +61,6 @@ const createUser = asyncHandler(async (req, res) => {
       userId: user._id,
     });
   } catch (error) {
-    // 🛑 FAIL-SAFE FOR DEV MODE 🛑
-    // If email fails (network issue), DO NOT DELETE USER.
-    // Instead, print OTP to logs so you can copy-paste it.
-
     console.log("------------------------------------------------");
     console.log("⚠️ EMAIL FAILED, BUT USER CREATED (DEV MODE)");
     console.log(`🔑 MANUAL OTP FOR ${emailLower}: ${otp}`);
@@ -106,22 +102,6 @@ const verifyEmailOTP = asyncHandler(async (req, res) => {
 
   const token = generateToken(user._id, user.role);
   res.json({ success: true, message: "Email verified!", token, user });
-});
-
-// Update user
-user.isEmailVerified = true;
-user.emailOTP = undefined;
-user.emailOTPExpires = undefined;
-user.lastLoginAt = new Date();
-await user.save();
-
-const token = generateToken(user._id, user.role);
-
-res.json({
-  success: true,
-  message: "Email verified successfully",
-  token,
-  user,
 });
 
 // 3. RESEND OTP
