@@ -5,13 +5,12 @@ require("dotenv").config();
 
 class EmailService {
   constructor() {
-    // FIX: Use 'service: gmail' instead of manual ports.
-    // This automatically handles the connection negotiation.
     this.transporter = nodemailer.createTransport({
       service: "gmail",
+      family: 4,
       auth: {
         user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS, // Your 16-char App Password
+        pass: process.env.EMAIL_PASS,
       },
     });
   }
@@ -38,7 +37,7 @@ class EmailService {
     try {
       // 1. Verify connection first
       await this.transporter.verify();
-      console.log("✅ SMTP Connection Established via Gmail Service");
+      console.log("✅ SMTP Connection Established via IPv4");
 
       // 2. Send Email
       const info = await this.transporter.sendMail(mailOptions);
