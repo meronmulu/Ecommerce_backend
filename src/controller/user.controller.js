@@ -1,4 +1,4 @@
-// server/controller/user.controller.js
+// src/controller/user.controller.js
 
 const User = require("../models/user.model");
 const bcrypt = require("bcryptjs");
@@ -18,16 +18,16 @@ const asyncHandler = (fn) => (req, res, next) => {
   Promise.resolve(fn(req, res, next)).catch(next);
 };
 
-// 1. REGISTER
+// 1. REGISTER (Strict Production Logic)
 const createUser = asyncHandler(async (req, res) => {
   const { name, email, password } = req.body;
   const emailLower = email.toLowerCase();
 
-  // Check if user exists
+  // --- CHECK EXISTING USER ---
   const existingUser = await User.findOne({ email: emailLower });
 
   if (existingUser) {
-    // SMART LOGIC: If user exists BUT is not verified, allow re-registration (overwrite)
+    // Self-Healing: If user exists but NEVER verified, delete them so we can register again
     if (!existingUser.isEmailVerified) {
       await User.findByIdAndDelete(existingUser._id);
     } else {
@@ -38,11 +38,11 @@ const createUser = asyncHandler(async (req, res) => {
     }
   }
 
-  // Generate OTP
+  // --- PREPARE DATA ---
   const otp = EmailService.generateOTP();
   const hashedPassword = await bcrypt.hash(password, 12);
 
-  // 1. Create User TEMPORARILY
+  // --- CREATE USER (Temporary) ---
   const user = await User.create({
     name,
     email: emailLower,
@@ -53,9 +53,10 @@ const createUser = asyncHandler(async (req, res) => {
   });
 
   try {
-    // 2. Try to send Email
+    // --- SEND EMAIL ---
     await EmailService.sendOTPEmail(emailLower, otp, name);
 
+    // Success response
     res.status(201).json({
       success: true,
       message:
@@ -63,14 +64,16 @@ const createUser = asyncHandler(async (req, res) => {
       userId: user._id,
     });
   } catch (error) {
-    // 3. IF EMAIL FAILS: Delete the user so they can try again!
+    // --- ROLLBACK (CRITICAL) ---
+    // If email fails, we MUST delete the user so they aren't stuck
     await User.findByIdAndDelete(user._id);
-    console.error("Registration Email Failed:", error);
+
+    console.error("🚨 Registration Rollback Triggered:", error.message);
 
     return res.status(500).json({
       success: false,
       message:
-        "Failed to send verification email. Please check your email address and try again.",
+        "Could not send verification email. Please check your email address and try again.",
     });
   }
 });
@@ -84,7 +87,7 @@ const verifyEmailOTP = asyncHandler(async (req, res) => {
   if (!user) {
     return res.status(404).json({
       success: false,
-      message: "User not found",
+      message: "User not found or registration expired. Please register again.",
     });
   }
 
@@ -145,15 +148,19 @@ const resendOTP = asyncHandler(async (req, res) => {
   user.emailOTPExpires = Date.now() + 10 * 60 * 1000;
   await user.save();
 
-  // Send new OTP
-  await EmailService.sendOTPEmail(email, otp, user.name);
-
-  res.json({
-    success: true,
-    message: "New verification code sent to your email",
-  });
+  try {
+    await EmailService.sendOTPEmail(email, otp, user.name);
+    res.json({
+      success: true,
+      message: "New verification code sent to your email",
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to send email. Please try again later.",
+    });
+  }
 });
-
 // 4. LOGIN with email verification check
 const loginUser = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
