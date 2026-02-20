@@ -18,26 +18,23 @@ const asyncHandler = (fn) => (req, res, next) => {
   Promise.resolve(fn(req, res, next)).catch(next);
 };
 
-// 1. REGISTER (Send OTP to email)
+// 1. REGISTER
 const createUser = asyncHandler(async (req, res) => {
   const { name, email, password } = req.body;
   const emailLower = email.toLowerCase();
 
-  // Check if user exists
   const existingUser = await User.findOne({ email: emailLower });
   if (existingUser) {
-    // If not verified, we can overwrite/resend
     if (!existingUser.isEmailVerified) {
-        await User.findByIdAndDelete(existingUser._id);
+      await User.findByIdAndDelete(existingUser._id);
     } else {
-        return res.status(400).json({
+      return res.status(400).json({
         success: false,
         message: "Email already registered",
-        });
+      });
     }
   }
 
-  // Generate OTP
   const otp = EmailService.generateOTP();
   const hashedPassword = await bcrypt.hash(password, 12);
 
@@ -46,28 +43,27 @@ const createUser = asyncHandler(async (req, res) => {
     email: emailLower,
     password: hashedPassword,
     emailOTP: otp,
-    emailOTPExpires: Date.now() + 10 * 60 * 1000, // 10 minutes
+    emailOTPExpires: Date.now() + 10 * 60 * 1000,
     isEmailVerified: false,
   });
 
   try {
-    // Try to Send OTP via email
-    await EmailService.sendOTPEmail(email, otp, name);
+    await EmailService.sendOTPEmail(emailLower, otp, name);
     res.status(201).json({
-        success: true,
-        message: "Registration successful. Please check your email for verification code.",
-        userId: user._id,
+      success: true,
+      message: "Verification code sent to your email.",
+      userId: user._id,
     });
   } catch (error) {
-    // 🛑 DEV MODE FALLBACK: If email fails, print OTP to logs and return success
+    // DEV MODE FALLBACK
     console.log("=================================================");
-    console.log(`🔑 DEV MODE OTP for ${email}: ${otp}`);
+    console.log(`🔑 DEV MODE OTP for ${emailLower}: ${otp}`);
     console.log("=================================================");
-    
+
     res.status(201).json({
-        success: true,
-        message: "Dev Mode: Email failed. Check Server Logs for OTP.",
-        userId: user._id,
+      success: true,
+      message: "Dev Mode: Email failed. Check Server Logs for OTP.",
+      userId: user._id,
     });
   }
 });
@@ -75,14 +71,10 @@ const createUser = asyncHandler(async (req, res) => {
 // 2. VERIFY EMAIL OTP
 const verifyEmailOTP = asyncHandler(async (req, res) => {
   const { userId, otp } = req.body;
-
   const user = await User.findById(userId).select("+emailOTP +emailOTPExpires");
 
   if (!user) {
-    return res.status(404).json({
-      success: false,
-      message: "User not found",
-    });
+    return res.status(404).json({ success: false, message: "User not found" });
   }
 
   const verification = EmailService.verifyOTP(
@@ -92,13 +84,11 @@ const verifyEmailOTP = asyncHandler(async (req, res) => {
   );
 
   if (!verification.valid) {
-    return res.status(400).json({
-      success: false,
-      message: verification.message,
-    });
+    return res
+      .status(400)
+      .json({ success: false, message: verification.message });
   }
 
-  // Update user
   user.isEmailVerified = true;
   user.emailOTP = undefined;
   user.emailOTPExpires = undefined;
@@ -118,120 +108,56 @@ const verifyEmailOTP = asyncHandler(async (req, res) => {
 // 3. RESEND OTP
 const resendOTP = asyncHandler(async (req, res) => {
   const { email } = req.body;
-
   const user = await User.findOne({ email: email.toLowerCase() });
 
-  if (!user) {
-    return res.status(404).json({
-      success: false,
-      message: "User not found",
-    });
-  }
+  if (!user)
+    return res.status(404).json({ success: false, message: "User not found" });
+  if (user.isEmailVerified)
+    return res.status(400).json({ success: false, message: "Email verified" });
 
-  if (user.isEmailVerified) {
-    return res.status(400).json({
-      success: false,
-      message: "Email already verified",
-    });
-  }
-
-  // Generate new OTP
   const otp = EmailService.generateOTP();
-
   user.emailOTP = otp;
   user.emailOTPExpires = Date.now() + 10 * 60 * 1000;
   await user.save();
 
   try {
     await EmailService.sendOTPEmail(email, otp, user.name);
-    res.json({
-        success: true,
-        message: "New verification code sent to your email",
-    });
+    res.json({ success: true, message: "New code sent!" });
   } catch (error) {
-    // 🛑 DEV MODE FALLBACK
-    console.log("=================================================");
     console.log(`♻️ RESEND DEV OTP for ${email}: ${otp}`);
-    console.log("=================================================");
-
-    res.json({
-        success: true,
-        message: "Dev Mode: Check Server Logs for new OTP",
-    });
+    res.json({ success: true, message: "Dev Mode: Check logs for OTP" });
   }
 });
 
-// 4. LOGIN with email verification check
+// 4. LOGIN
 const loginUser = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
-
   const user = await User.findOne({ email: email.toLowerCase() }).select(
-    "+password +loginAttempts +lockUntil +isEmailVerified +emailOTP +emailOTPExpires",
+    "+password +isEmailVerified",
   );
 
   if (!user) {
-    return res.status(401).json({
-      success: false,
-      message: "Invalid email or password",
-    });
-  }
-
-  // Check if account is locked
-  if (user.lockUntil && user.lockUntil > Date.now()) {
-    const remainingTime = Math.ceil((user.lockUntil - Date.now()) / 60000);
-    return res.status(429).json({
-      success: false,
-      message: `Too many failed attempts. Try again in ${remainingTime} minutes`,
-    });
+    return res
+      .status(401)
+      .json({ success: false, message: "Invalid credentials" });
   }
 
   const isPasswordValid = await bcrypt.compare(password, user.password);
 
   if (!isPasswordValid) {
-    // Increment login attempts
-    user.loginAttempts = (user.loginAttempts || 0) + 1;
-
-    // Lock account after 5 failed attempts
-    if (user.loginAttempts >= 5) {
-      user.lockUntil = Date.now() + 30 * 60 * 1000; // Lock for 30 minutes
-    }
-
-    await user.save();
-
-    return res.status(401).json({
-      success: false,
-      message: "Invalid email or password",
-    });
+    return res
+      .status(401)
+      .json({ success: false, message: "Invalid credentials" });
   }
 
-  // Check if email is verified
   if (!user.isEmailVerified) {
-    // Generate new OTP
-    const otp = EmailService.generateOTP();
-    user.emailOTP = otp;
-    user.emailOTPExpires = Date.now() + 10 * 60 * 1000;
-    await user.save();
-
-    try {
-        await EmailService.sendOTPEmail(email, otp, user.name);
-    } catch (error) {
-        console.log(`🔑 DEV MODE LOGIN OTP: ${otp}`);
-    }
-
     return res.status(403).json({
       success: false,
-      message:
-        "Please verify your email first. A new verification code has been sent.",
+      message: "Please verify your email first.",
       requiresVerification: true,
       userId: user._id,
     });
   }
-
-  // Reset login attempts on successful login
-  user.loginAttempts = 0;
-  user.lockUntil = undefined;
-  user.lastLoginAt = new Date();
-  await user.save();
 
   const token = generateToken(user._id, user.role);
 
@@ -243,162 +169,81 @@ const loginUser = asyncHandler(async (req, res) => {
   });
 });
 
-// 5. REQUEST VERIFICATION (Upload ID)
+// 5. REQUEST VERIFICATION
 const requestVerification = asyncHandler(async (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({
-      success: false,
-      message: "ID image is required",
-    });
-  }
+  if (!req.file) return res.status(400).json({ message: "ID image required" });
 
   const user = await User.findById(req.user.userId);
-
-  if (!user.canRequestVerification()) {
-    if (user.role === "VERIFIED_SELLER") {
-      return res.status(400).json({
-        success: false,
-        message: "You are already verified",
-      });
-    }
-    if (user.kyc.status === "PENDING") {
-      return res.status(400).json({
-        success: false,
-        message: "You already have a pending verification request",
-      });
-    }
-  }
-
   user.kyc = {
     status: "PENDING",
     idImage: req.file.path,
     submittedAt: new Date(),
   };
-
   await user.save();
 
-  res.json({
-    success: true,
-    message:
-      "Verification request submitted successfully. Admin will review your ID.",
-  });
+  res.json({ success: true, message: "Verification request submitted" });
 });
 
-// 6. ADMIN VERIFIES USER
+// 6. ADMIN VERIFY
 const adminVerifyUser = asyncHandler(async (req, res) => {
-  const { userId, status, rejectionReason } = req.body;
-
-  if (!["APPROVED", "REJECTED"].includes(status)) {
-    return res.status(400).json({
-      success: false,
-      message: "Invalid status. Must be APPROVED or REJECTED",
-    });
-  }
-
+  const { userId, status } = req.body;
   const user = await User.findById(userId);
 
-  if (!user) {
-    return res.status(404).json({
-      success: false,
-      message: "User not found",
-    });
-  }
-
-  if (user.kyc.status !== "PENDING") {
-    return res.status(400).json({
-      success: false,
-      message: "No pending verification request for this user",
-    });
-  }
+  if (!user) return res.status(404).json({ message: "User not found" });
 
   user.kyc.status = status;
-  user.kyc.reviewedAt = new Date();
-  user.kyc.reviewedBy = req.user.userId;
-
-  if (status === "APPROVED") {
-    user.role = "VERIFIED_SELLER";
-  } else if (rejectionReason) {
-    user.kyc.rejectionReason = rejectionReason;
-  }
+  if (status === "APPROVED") user.role = "VERIFIED_SELLER";
 
   await user.save();
-
-  res.json({
-    success: true,
-    message:
-      status === "APPROVED"
-        ? "User has been verified as a seller"
-        : "Verification request rejected",
-  });
+  res.json({ success: true, message: `User status: ${status}` });
 });
 
-// 7. GET USER PROFILE
+// 7. GET PROFILE
 const getUserProfile = asyncHandler(async (req, res) => {
   const user = await User.findById(req.user.userId);
-
-  if (!user) {
-    return res.status(404).json({
-      success: false,
-      message: "User not found",
-    });
-  }
-
-  res.json({
-    success: true,
-    data: user,
-  });
+  res.json({ success: true, data: user });
 });
 
-// 8. UPDATE USER PROFILE
+// 8. UPDATE PROFILE
 const updateProfile = asyncHandler(async (req, res) => {
   const { name, phone } = req.body;
   const updates = {};
-
   if (name) updates.name = name;
-  if (phone) {
-    // Check if phone is already taken
-    const existingUser = await User.findOne({
-      phone,
-      _id: { $ne: req.user.userId },
-    });
-    if (existingUser) {
-      return res.status(400).json({
-        success: false,
-        message: "Phone number already in use",
-      });
-    }
-    updates.phone = phone;
-  }
+  if (phone) updates.phone = phone;
 
   const user = await User.findByIdAndUpdate(req.user.userId, updates, {
     new: true,
-    runValidators: true,
   });
-
-  res.json({
-    success: true,
-    message: "Profile updated successfully",
-    data: user,
-  });
+  res.json({ success: true, message: "Profile updated", data: user });
 });
 
-// 9. CHANGE PASSWORD
+// 9. CHANGE PASSWORD (FIXED)
 const changePassword = asyncHandler(async (req, res) => {
   const { currentPassword, newPassword } = req.body;
 
+  // 1. Get user with password explicitly
   const user = await User.findById(req.user.userId).select("+password");
 
-  const isPasswordValid = await bcrypt.compare(currentPassword, user.password);
-
-  if (!isPasswordValid) {
-    return res.status(401).json({
-      success: false,
-      message: "Current password is incorrect",
-    });
+  if (!user) {
+    return res.status(404).json({ success: false, message: "User not found" });
   }
 
-  user.password = await bcrypt.hash(newPassword, 12);
-  await user.save();
+  // 2. Verify Old Password
+  const isPasswordValid = await bcrypt.compare(currentPassword, user.password);
+  if (!isPasswordValid) {
+    return res
+      .status(401)
+      .json({ success: false, message: "Current password is incorrect" });
+  }
+
+  // 3. Hash New Password
+  const hashedPassword = await bcrypt.hash(newPassword, 12);
+
+  // 4. FORCE UPDATE using findByIdAndUpdate
+  // This bypasses standard save() which sometimes misses password field updates if validation is tricky
+  await User.findByIdAndUpdate(req.user.userId, {
+    password: hashedPassword,
+  });
 
   res.json({
     success: true,
@@ -406,89 +251,58 @@ const changePassword = asyncHandler(async (req, res) => {
   });
 });
 
-// 10. FORGOT PASSWORD (Request reset)
+// 10. FORGOT PASSWORD
 const forgotPassword = asyncHandler(async (req, res) => {
   const { email } = req.body;
-
   const user = await User.findOne({ email: email.toLowerCase() });
 
-  if (!user) {
-    // Don't reveal if user exists or not for security
+  if (!user)
     return res.json({
       success: true,
-      message:
-        "If your email is registered, you will receive a password reset link",
+      message: "If registered, reset link sent.",
     });
-  }
 
-  // Generate reset token
   const resetToken = crypto.randomBytes(32).toString("hex");
   const resetTokenHash = await bcrypt.hash(resetToken, 10);
 
   user.resetPasswordToken = resetTokenHash;
-  user.resetPasswordExpires = Date.now() + 60 * 60 * 1000; // 1 hour
+  user.resetPasswordExpires = Date.now() + 60 * 60 * 1000;
   await user.save();
 
-  // Send email with reset link (DEV MODE PRINT)
-  const resetLink = `http://localhost:3000/reset-password?token=${resetToken}&userId=${user._id}`;
-  
-  try {
-      // Try send email
-      // await EmailService.sendResetEmail(email, resetLink);
-      // For now just logging
-      console.log(`\n🔑 RESET LINK: ${resetLink}\n`);
-  } catch (e) {
-      console.log(`\n🔑 DEV MODE RESET LINK: ${resetLink}\n`);
-  }
+  console.log(
+    `\n🔑 RESET LINK: http://localhost:3000/reset-password?token=${resetToken}&userId=${user._id}\n`,
+  );
 
-  res.json({
-    success: true,
-    message:
-      "If your email is registered, you will receive a password reset link",
-  });
+  res.json({ success: true, message: "Reset link sent (Check logs)" });
 });
 
 // 11. RESET PASSWORD
 const resetPassword = asyncHandler(async (req, res) => {
   const { userId, token, newPassword } = req.body;
-
   const user = await User.findById(userId).select(
     "+resetPasswordToken +resetPasswordExpires",
   );
 
-  if (!user || !user.resetPasswordToken || !user.resetPasswordExpires) {
-    return res.status(400).json({
-      success: false,
-      message: "Invalid or expired reset token",
-    });
-  }
-
-  if (user.resetPasswordExpires < Date.now()) {
-    return res.status(400).json({
-      success: false,
-      message: "Reset token has expired",
-    });
+  if (
+    !user ||
+    !user.resetPasswordToken ||
+    user.resetPasswordExpires < Date.now()
+  ) {
+    return res
+      .status(400)
+      .json({ success: false, message: "Invalid/Expired token" });
   }
 
   const isValidToken = await bcrypt.compare(token, user.resetPasswordToken);
-
-  if (!isValidToken) {
-    return res.status(400).json({
-      success: false,
-      message: "Invalid reset token",
-    });
-  }
+  if (!isValidToken)
+    return res.status(400).json({ success: false, message: "Invalid token" });
 
   user.password = await bcrypt.hash(newPassword, 12);
   user.resetPasswordToken = undefined;
   user.resetPasswordExpires = undefined;
   await user.save();
 
-  res.json({
-    success: true,
-    message:
-      "Password reset successful. You can now login with your new password.",
-  });
+  res.json({ success: true, message: "Password reset successful" });
 });
 
 module.exports = {
