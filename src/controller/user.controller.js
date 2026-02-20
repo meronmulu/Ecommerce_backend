@@ -18,59 +18,56 @@ const asyncHandler = (fn) => (req, res, next) => {
   Promise.resolve(fn(req, res, next)).catch(next);
 };
 
-// 1. REGISTER
+// 1. REGISTER (Send OTP to email)
 const createUser = asyncHandler(async (req, res) => {
   const { name, email, password } = req.body;
   const emailLower = email.toLowerCase();
 
-  // 1. Check existing user
+  // Check if user exists
   const existingUser = await User.findOne({ email: emailLower });
   if (existingUser) {
-    // If not verified, delete old record to allow retry
+    // If not verified, we can overwrite/resend
     if (!existingUser.isEmailVerified) {
-      await User.findByIdAndDelete(existingUser._id);
+        await User.findByIdAndDelete(existingUser._id);
     } else {
-      return res.status(400).json({
+        return res.status(400).json({
         success: false,
-        message: "Email already registered. Please login.",
-      });
+        message: "Email already registered",
+        });
     }
   }
 
-  // 2. Generate Data
+  // Generate OTP
   const otp = EmailService.generateOTP();
   const hashedPassword = await bcrypt.hash(password, 12);
 
-  // 3. Create User
   const user = await User.create({
     name,
     email: emailLower,
     password: hashedPassword,
     emailOTP: otp,
-    emailOTPExpires: Date.now() + 10 * 60 * 1000,
+    emailOTPExpires: Date.now() + 10 * 60 * 1000, // 10 minutes
     isEmailVerified: false,
   });
 
   try {
-    // 4. Attempt Email Send
-    await EmailService.sendOTPEmail(emailLower, otp, name);
-
+    // Try to Send OTP via email
+    await EmailService.sendOTPEmail(email, otp, name);
     res.status(201).json({
-      success: true,
-      message: "Verification code sent to your email.",
-      userId: user._id,
+        success: true,
+        message: "Registration successful. Please check your email for verification code.",
+        userId: user._id,
     });
   } catch (error) {
-    console.log("------------------------------------------------");
-    console.log("⚠️ EMAIL FAILED, BUT USER CREATED (DEV MODE)");
-    console.log(`🔑 MANUAL OTP FOR ${emailLower}: ${otp}`);
-    console.log("------------------------------------------------");
-
-    // Return SUCCESS to Flutter so the app navigates to OTP Screen
-    return res.status(201).json({
-      success: true,
-      message: "Dev Mode: Email failed. Check Server Logs for OTP.",
-      userId: user._id,
+    // 🛑 DEV MODE FALLBACK: If email fails, print OTP to logs and return success
+    console.log("=================================================");
+    console.log(`🔑 DEV MODE OTP for ${email}: ${otp}`);
+    console.log("=================================================");
+    
+    res.status(201).json({
+        success: true,
+        message: "Dev Mode: Email failed. Check Server Logs for OTP.",
+        userId: user._id,
     });
   }
 });
@@ -78,10 +75,15 @@ const createUser = asyncHandler(async (req, res) => {
 // 2. VERIFY EMAIL OTP
 const verifyEmailOTP = asyncHandler(async (req, res) => {
   const { userId, otp } = req.body;
+
   const user = await User.findById(userId).select("+emailOTP +emailOTPExpires");
 
-  if (!user)
-    return res.status(404).json({ success: false, message: "User not found." });
+  if (!user) {
+    return res.status(404).json({
+      success: false,
+      message: "User not found",
+    });
+  }
 
   const verification = EmailService.verifyOTP(
     user.emailOTP,
@@ -90,18 +92,27 @@ const verifyEmailOTP = asyncHandler(async (req, res) => {
   );
 
   if (!verification.valid) {
-    return res
-      .status(400)
-      .json({ success: false, message: verification.message });
+    return res.status(400).json({
+      success: false,
+      message: verification.message,
+    });
   }
 
+  // Update user
   user.isEmailVerified = true;
   user.emailOTP = undefined;
   user.emailOTPExpires = undefined;
+  user.lastLoginAt = new Date();
   await user.save();
 
   const token = generateToken(user._id, user.role);
-  res.json({ success: true, message: "Email verified!", token, user });
+
+  res.json({
+    success: true,
+    message: "Email verified successfully",
+    token,
+    user,
+  });
 });
 
 // 3. RESEND OTP
@@ -134,16 +145,22 @@ const resendOTP = asyncHandler(async (req, res) => {
   try {
     await EmailService.sendOTPEmail(email, otp, user.name);
     res.json({
-      success: true,
-      message: "New verification code sent to your email",
+        success: true,
+        message: "New verification code sent to your email",
     });
   } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: "Failed to send email. Please try again later.",
+    // 🛑 DEV MODE FALLBACK
+    console.log("=================================================");
+    console.log(`♻️ RESEND DEV OTP for ${email}: ${otp}`);
+    console.log("=================================================");
+
+    res.json({
+        success: true,
+        message: "Dev Mode: Check Server Logs for new OTP",
     });
   }
 });
+
 // 4. LOGIN with email verification check
 const loginUser = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
@@ -189,13 +206,17 @@ const loginUser = asyncHandler(async (req, res) => {
 
   // Check if email is verified
   if (!user.isEmailVerified) {
-    // Generate and send new OTP
+    // Generate new OTP
     const otp = EmailService.generateOTP();
     user.emailOTP = otp;
     user.emailOTPExpires = Date.now() + 10 * 60 * 1000;
     await user.save();
 
-    await EmailService.sendOTPEmail(email, otp, user.name);
+    try {
+        await EmailService.sendOTPEmail(email, otp, user.name);
+    } catch (error) {
+        console.log(`🔑 DEV MODE LOGIN OTP: ${otp}`);
+    }
 
     return res.status(403).json({
       success: false,
@@ -408,10 +429,17 @@ const forgotPassword = asyncHandler(async (req, res) => {
   user.resetPasswordExpires = Date.now() + 60 * 60 * 1000; // 1 hour
   await user.save();
 
-  // Send email with reset link (you can create a beautiful template for this too)
-  console.log(
-    `\n📧 PASSWORD RESET LINK: http://localhost:3000/reset-password?token=${resetToken}&userId=${user._id}\n`,
-  );
+  // Send email with reset link (DEV MODE PRINT)
+  const resetLink = `http://localhost:3000/reset-password?token=${resetToken}&userId=${user._id}`;
+  
+  try {
+      // Try send email
+      // await EmailService.sendResetEmail(email, resetLink);
+      // For now just logging
+      console.log(`\n🔑 RESET LINK: ${resetLink}\n`);
+  } catch (e) {
+      console.log(`\n🔑 DEV MODE RESET LINK: ${resetLink}\n`);
+  }
 
   res.json({
     success: true,
