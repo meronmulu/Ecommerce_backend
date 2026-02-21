@@ -263,35 +263,45 @@ const changePassword = asyncHandler(async (req, res) => {
   });
 });
 
-// 10. FORGOT PASSWORD
+// 10. FORGOT PASSWORD (OTP Version)
 const forgotPassword = asyncHandler(async (req, res) => {
   const { email } = req.body;
-  const user = await User.findOne({ email: email.toLowerCase() });
+  const emailLower = email.toLowerCase();
 
-  if (!user)
-    return res.json({
-      success: true,
-      message: "If registered, reset link sent.",
-    });
+  const user = await User.findOne({ email: emailLower });
 
-  const resetToken = crypto.randomBytes(32).toString("hex");
-  const resetTokenHash = await bcrypt.hash(resetToken, 10);
+  if (!user) {
+    // Return success to prevent email enumeration attacks
+    return res.json({ success: true, message: "If email exists, code sent." });
+  }
 
-  user.resetPasswordToken = resetTokenHash;
-  user.resetPasswordExpires = Date.now() + 60 * 60 * 1000;
-  await user.save();
+  // Generate 6-digit Code
+  const otp = EmailService.generateOTP();
+  const hashedOTP = await bcrypt.hash(otp, 10);
 
-  console.log(
-    `\n🔑 RESET LINK: http://localhost:3000/reset-password?token=${resetToken}&userId=${user._id}\n`,
+  // Force Update Database
+  await User.updateOne(
+    { _id: user._id },
+    {
+      resetPasswordToken: hashedOTP,
+      resetPasswordExpires: Date.now() + 10 * 60 * 1000, // 10 mins
+    },
   );
 
-  res.json({ success: true, message: "Reset link sent (Check logs)" });
+  try {
+    await EmailService.sendPasswordResetEmail(emailLower, otp);
+    res.json({ success: true, message: "Reset code sent to email" });
+  } catch (error) {
+    console.log(`🔑 DEV MODE RESET OTP: ${otp}`);
+    res.json({ success: true, message: "Dev Mode: Check logs for OTP" });
+  }
 });
 
-// 11. RESET PASSWORD
+// 11. RESET PASSWORD (OTP Version)
 const resetPassword = asyncHandler(async (req, res) => {
-  const { userId, token, newPassword } = req.body;
-  const user = await User.findById(userId).select(
+  const { email, otp, newPassword } = req.body; // Changed from userId/token to email/otp
+
+  const user = await User.findOne({ email: email.toLowerCase() }).select(
     "+resetPasswordToken +resetPasswordExpires",
   );
 
@@ -302,21 +312,22 @@ const resetPassword = asyncHandler(async (req, res) => {
   ) {
     return res
       .status(400)
-      .json({ success: false, message: "Invalid/Expired token" });
+      .json({ success: false, message: "Invalid or expired code" });
   }
 
-  const isValidToken = await bcrypt.compare(token, user.resetPasswordToken);
-  if (!isValidToken)
-    return res.status(400).json({ success: false, message: "Invalid token" });
+  const isValid = await bcrypt.compare(otp, user.resetPasswordToken);
+  if (!isValid) {
+    return res.status(400).json({ success: false, message: "Invalid code" });
+  }
 
   const hashedPassword = await bcrypt.hash(newPassword, 12);
 
-  // Use updateOne here too for safety
+  // Force Update Password
   await User.updateOne(
-    { _id: userId },
+    { _id: user._id },
     {
-      $set: { password: hashedPassword },
-      $unset: { resetPasswordToken: 1, resetPasswordExpires: 1 }, // Remove fields
+      password: hashedPassword,
+      $unset: { resetPasswordToken: 1, resetPasswordExpires: 1 },
     },
   );
 

@@ -1,20 +1,25 @@
-// src/services/emailService.js
+// server/services/emailService.js
 
 const nodemailer = require("nodemailer");
+const dns = require("dns");
 require("dotenv").config();
+
+try {
+  dns.setDefaultResultOrder("ipv4first");
+} catch (e) {}
 
 class EmailService {
   constructor() {
     this.transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST || "smtp.gmail.com",
-      port: 465, // SSL
+      host: "smtp.gmail.com",
+      port: 465,
       secure: true,
+      family: 4,
       auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS,
       },
-      // Keep family: 4 just to be safe, though Railway usually supports IPv6
-      family: 4,
+      tls: { rejectUnauthorized: false },
     });
   }
 
@@ -22,36 +27,45 @@ class EmailService {
     return Math.floor(100000 + Math.random() * 900000).toString();
   }
 
+  // 1. REGISTRATION OTP
   async sendOTPEmail(email, otp, userName = "User") {
-    const mailOptions = {
-      from: `"Used Tech Market" <${process.env.EMAIL_USER}>`,
-      to: email,
-      subject: "🔐 Your Verification Code",
-      html: `
-        <div style="font-family: Arial, sans-serif; padding: 20px; background-color: #f4f4f4;">
-          <div style="max-width: 600px; margin: 0 auto; background: white; border-radius: 10px; overflow: hidden;">
-            <div style="background: #00838F; padding: 20px; text-align: center; color: white;">
-              <h1>Used Tech Market</h1>
-            </div>
-            <div style="padding: 30px; text-align: center;">
-              <h2>Verification Code</h2>
-              <p>Hello ${userName}, use this code to complete your registration:</p>
-              <h1 style="background: #e0f7fa; color: #00838F; display: inline-block; padding: 10px 20px; letter-spacing: 5px; border-radius: 5px;">${otp}</h1>
-              <p>This code expires in 10 minutes.</p>
-            </div>
-          </div>
-        </div>
-      `,
-    };
+    return this._sendEmail(
+      email,
+      "🔐 Your Verification Code",
+      `<h1>${otp}</h1><p>Use this code to verify your account.</p>`,
+    );
+  }
 
+  // 2. PASSWORD RESET OTP
+  async sendPasswordResetEmail(email, otp) {
+    return this._sendEmail(
+      email,
+      "🔑 Reset Your Password",
+      `
+      <div style="font-family: Arial; padding: 20px;">
+        <h2>Password Reset Request</h2>
+        <p>Use the code below to reset your password:</p>
+        <h1 style="color: #d9534f; letter-spacing: 5px;">${otp}</h1>
+        <p>This code expires in 10 minutes.</p>
+      </div>
+      `,
+    );
+  }
+
+  // Helper function to avoid code duplication
+  async _sendEmail(to, subject, htmlContent) {
     try {
       await this.transporter.verify();
-      console.log("✅ SMTP Connected");
-      const info = await this.transporter.sendMail(mailOptions);
+      const info = await this.transporter.sendMail({
+        from: `"Used Tech Market" <${process.env.EMAIL_USER}>`,
+        to,
+        subject,
+        html: htmlContent,
+      });
       console.log("📧 Email Sent:", info.messageId);
       return { success: true };
     } catch (error) {
-      console.error("❌ Email Error:", error);
+      console.error("❌ Email Error:", error.message);
       throw error;
     }
   }
