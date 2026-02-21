@@ -1,27 +1,20 @@
-// server/services/emailService.js
+// src/services/emailService.js
 
 const nodemailer = require("nodemailer");
-const dns = require("dns");
 require("dotenv").config();
-
-try {
-  dns.setDefaultResultOrder("ipv4first");
-} catch (e) {}
 
 class EmailService {
   constructor() {
     this.transporter = nodemailer.createTransport({
-      host: "smtp.gmail.com",
-      port: 465,
+      host: process.env.SMTP_HOST || "smtp.gmail.com",
+      port: 465, // SSL
       secure: true,
-      family: 4,
       auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS,
       },
-      tls: {
-        rejectUnauthorized: false,
-      },
+      // Keep family: 4 just to be safe, though Railway usually supports IPv6
+      family: 4,
     });
   }
 
@@ -34,20 +27,31 @@ class EmailService {
       from: `"Used Tech Market" <${process.env.EMAIL_USER}>`,
       to: email,
       subject: "🔐 Your Verification Code",
-      html: this.getEmailTemplate(otp, userName),
+      html: `
+        <div style="font-family: Arial, sans-serif; padding: 20px; background-color: #f4f4f4;">
+          <div style="max-width: 600px; margin: 0 auto; background: white; border-radius: 10px; overflow: hidden;">
+            <div style="background: #00838F; padding: 20px; text-align: center; color: white;">
+              <h1>Used Tech Market</h1>
+            </div>
+            <div style="padding: 30px; text-align: center;">
+              <h2>Verification Code</h2>
+              <p>Hello ${userName}, use this code to complete your registration:</p>
+              <h1 style="background: #e0f7fa; color: #00838F; display: inline-block; padding: 10px 20px; letter-spacing: 5px; border-radius: 5px;">${otp}</h1>
+              <p>This code expires in 10 minutes.</p>
+            </div>
+          </div>
+        </div>
+      `,
     };
 
     try {
-      // Verify connection
       await this.transporter.verify();
-      console.log("✅ SMTP Connection Established");
-
+      console.log("✅ SMTP Connected");
       const info = await this.transporter.sendMail(mailOptions);
-      console.log("📧 Email sent successfully:", info.messageId);
-      return { success: true, messageId: info.messageId };
+      console.log("📧 Email Sent:", info.messageId);
+      return { success: true };
     } catch (error) {
-      console.error("❌ Email Fatal Error:", error.message);
-      // RE-THROW the error so the controller handles it
+      console.error("❌ Email Error:", error);
       throw error;
     }
   }
@@ -56,22 +60,9 @@ class EmailService {
     if (!storedOTP || !storedExpiry)
       return { valid: false, message: "No OTP found." };
     if (new Date() > new Date(storedExpiry))
-      return { valid: false, message: "OTP has expired." };
+      return { valid: false, message: "OTP expired." };
     if (storedOTP !== userOTP) return { valid: false, message: "Invalid OTP." };
-    return { valid: true, message: "OTP verified successfully" };
-  }
-
-  getEmailTemplate(otp, userName) {
-    return `
-      <div style="font-family: Arial; padding: 20px; background: #f4f4f4;">
-        <div style="background: white; padding: 20px; border-radius: 10px; text-align: center;">
-          <h2 style="color: #00838F;">Used Tech Market</h2>
-          <p>Hello ${userName}, your verification code is:</p>
-          <h1 style="color: #00838F; letter-spacing: 5px; font-size: 40px;">${otp}</h1>
-          <p>Valid for 10 minutes.</p>
-        </div>
-      </div>
-    `;
+    return { valid: true, message: "Verified" };
   }
 }
 
