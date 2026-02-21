@@ -99,4 +99,13 @@ router.post("/test-email", async (req, res) => {
   }
 });
 
+router.get("/wake-up", (req, res) => {
+  console.log("⏰ Wake-up ping received at:", new Date().toISOString());
+  res.json({
+    success: true,
+    message: "Server is awake",
+    timestamp: new Date().toISOString(),
+  });
+});
+
 module.exports = router;
