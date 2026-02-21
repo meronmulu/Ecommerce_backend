@@ -130,8 +130,8 @@ app.use("/api/payment", require("./src/routes/payment.routes"));
 app.use("/api/chat", require("./src/routes/chat.routes"));
 app.use("/api/withdrawals", require("./src/routes/withdrawal.routes"));
 
-// 404 handler for undefined routes
-app.use("*", (req, res) => {
+// ✅ FIXED: 404 handler for undefined routes (no wildcard needed)
+app.use((req, res) => {
   res.status(404).json({
     success: false,
     message: "Route not found",

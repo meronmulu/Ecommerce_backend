@@ -72,4 +72,31 @@ router.put(
   adminVerifyUser,
 );
 
+router.post("/test-email", async (req, res) => {
+  try {
+    const { email } = req.body;
+    const EmailService = require("../services/emailService");
+
+    console.log("🧪 Testing email send to:", email);
+    console.log("📧 Email user:", process.env.EMAIL_USER);
+    console.log("📧 Email pass length:", process.env.EMAIL_PASS?.length);
+
+    const otp = EmailService.generateOTP();
+    await EmailService.sendOTPEmail(email, otp, "Test User");
+
+    res.json({
+      success: true,
+      message: "Test email sent successfully",
+      otp: otp, // Include for testing
+    });
+  } catch (error) {
+    console.error("❌ Test email error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+      error: error.toString(),
+    });
+  }
+});
+
 module.exports = router;
