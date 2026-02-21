@@ -8,27 +8,26 @@ const {
   verifyEmailOTP,
   resendOTP,
   loginUser,
+  forgotPassword,
+  resetPassword,
+  changePassword,
   requestVerification,
   adminVerifyUser,
   getUserProfile,
   updateProfile,
-  changePassword,
-  forgotPassword,
-  resetPassword,
 } = require("../controller/user.controller");
 const {
   authenticateUser,
   authorizeRoles,
-  loginRateLimiter,
 } = require("../middlewares/authMiddleware");
 
-// TEST ENDPOINT - Add this at the top
+// Test endpoint
 router.get("/test", (req, res) => {
   res.json({
     success: true,
     message: "Backend is working!",
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || "development",
+    environment: process.env.NODE_ENV || "production",
   });
 });
 
@@ -36,7 +35,7 @@ router.get("/test", (req, res) => {
 router.post("/register", createUser);
 router.post("/verify-email", verifyEmailOTP);
 router.post("/resend-otp", resendOTP);
-router.post("/login", loginRateLimiter, loginUser);
+router.post("/login", loginUser);
 router.post("/forgot-password", forgotPassword);
 router.post("/reset-password", resetPassword);
 
@@ -59,7 +58,6 @@ router.get(
   authenticateUser,
   authorizeRoles("ADMIN"),
   async (req, res) => {
-    const User = require("../models/user.model");
     const users = await User.find({ "kyc.status": "PENDING" }).select(
       "name email phone kyc.submittedAt",
     );
@@ -73,13 +71,5 @@ router.put(
   authorizeRoles("ADMIN"),
   adminVerifyUser,
 );
-
-router.get("/test", (req, res) => {
-  res.json({
-    success: true,
-    message: "Backend is working!",
-    timestamp: new Date().toISOString(),
-  });
-});
 
 module.exports = router;

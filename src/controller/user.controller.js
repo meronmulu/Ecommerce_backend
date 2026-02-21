@@ -106,10 +106,12 @@ const resendOTP = asyncHandler(async (req, res) => {
   const { email } = req.body;
   const user = await User.findOne({ email: email.toLowerCase() });
 
-  if (!user)
+  if (!user) {
     return res.status(404).json({ success: false, message: "User not found" });
-  if (user.isEmailVerified)
+  }
+  if (user.isEmailVerified) {
     return res.status(400).json({ success: false, message: "Email verified" });
+  }
 
   const otp = EmailService.generateOTP();
   user.emailOTP = otp;
@@ -129,7 +131,6 @@ const resendOTP = asyncHandler(async (req, res) => {
 const loginUser = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
 
-  // Explicitly select password to compare
   const user = await User.findOne({ email: email.toLowerCase() }).select(
     "+password +isEmailVerified",
   );
@@ -167,9 +168,161 @@ const loginUser = asyncHandler(async (req, res) => {
   });
 });
 
-// 5. REQUEST VERIFICATION
+// 5. FORGOT PASSWORD - Send OTP
+const forgotPassword = asyncHandler(async (req, res) => {
+  const { email } = req.body;
+  const emailLower = email.toLowerCase();
+
+  console.log(`🔐 Forgot password requested for: ${emailLower}`);
+
+  const user = await User.findOne({ email: emailLower });
+
+  // Always return success to prevent email enumeration
+  if (!user) {
+    console.log(`❌ User not found: ${emailLower}`);
+    return res.json({
+      success: true,
+      message: "If your email is registered, you will receive a reset code.",
+    });
+  }
+
+  // Generate 6-digit OTP
+  const otp = EmailService.generateOTP();
+  const hashedOTP = await bcrypt.hash(otp, 10);
+
+  // Store hashed OTP in database
+  user.resetPasswordToken = hashedOTP;
+  user.resetPasswordExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
+  await user.save();
+
+  console.log(`✅ Reset OTP generated for ${emailLower}: ${otp}`);
+
+  try {
+    // Send OTP via email
+    await EmailService.sendPasswordResetEmail(emailLower, otp, user.name);
+    console.log(`✅ Reset email sent to: ${emailLower}`);
+
+    res.json({
+      success: true,
+      message: "Reset code sent to your email.",
+    });
+  } catch (error) {
+    console.error(`❌ Failed to send reset email to: ${emailLower}`, error);
+
+    // For development, return OTP in response
+    if (process.env.NODE_ENV === "development") {
+      return res.json({
+        success: true,
+        message: "Dev Mode: Check logs for OTP",
+        dev_otp: otp, // Only in development!
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "Reset code sent to your email.",
+    });
+  }
+});
+
+// 6. RESET PASSWORD - Verify OTP and set new password
+const resetPassword = asyncHandler(async (req, res) => {
+  const { email, otp, newPassword } = req.body;
+  const emailLower = email.toLowerCase();
+
+  console.log(`🔐 Reset password attempt for: ${emailLower}`);
+
+  // Find user with reset token fields
+  const user = await User.findOne({ email: emailLower }).select(
+    "+resetPasswordToken +resetPasswordExpires",
+  );
+
+  if (!user) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid or expired reset code.",
+    });
+  }
+
+  // Check if reset token exists and is not expired
+  if (
+    !user.resetPasswordToken ||
+    !user.resetPasswordExpires ||
+    user.resetPasswordExpires < Date.now()
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: "Reset code has expired. Please request a new one.",
+    });
+  }
+
+  // Verify OTP
+  const isValidOTP = await bcrypt.compare(otp, user.resetPasswordToken);
+
+  if (!isValidOTP) {
+    console.log(`❌ Invalid OTP for ${emailLower}`);
+    return res.status(400).json({
+      success: false,
+      message: "Invalid reset code.",
+    });
+  }
+
+  // Hash new password
+  const hashedPassword = await bcrypt.hash(newPassword, 12);
+
+  // Update user password and clear reset fields
+  user.password = hashedPassword;
+  user.resetPasswordToken = undefined;
+  user.resetPasswordExpires = undefined;
+  await user.save();
+
+  console.log(`✅ Password reset successful for: ${emailLower}`);
+
+  res.json({
+    success: true,
+    message:
+      "Password reset successful. You can now login with your new password.",
+  });
+});
+
+// 7. CHANGE PASSWORD (Authenticated)
+const changePassword = asyncHandler(async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+  const userId = req.user.userId;
+
+  console.log(`🔐 Password change attempt for User ID: ${userId}`);
+
+  const user = await User.findById(userId).select("+password");
+
+  if (!user) {
+    return res.status(404).json({ success: false, message: "User not found" });
+  }
+
+  const isMatch = await bcrypt.compare(currentPassword, user.password);
+  if (!isMatch) {
+    return res
+      .status(401)
+      .json({ success: false, message: "Current password is incorrect" });
+  }
+
+  const hashedPassword = await bcrypt.hash(newPassword, 12);
+
+  user.password = hashedPassword;
+  await user.save();
+
+  console.log(`✅ Password changed successfully for User ID: ${userId}`);
+
+  res.json({
+    success: true,
+    message: "Password changed successfully",
+  });
+});
+
+// 8. REQUEST VERIFICATION
 const requestVerification = asyncHandler(async (req, res) => {
-  if (!req.file) return res.status(400).json({ message: "ID image required" });
+  if (!req.file) {
+    return res.status(400).json({ message: "ID image required" });
+  }
 
   const user = await User.findById(req.user.userId);
   user.kyc = {
@@ -182,7 +335,7 @@ const requestVerification = asyncHandler(async (req, res) => {
   res.json({ success: true, message: "Verification request submitted" });
 });
 
-// 6. ADMIN VERIFY
+// 9. ADMIN VERIFY
 const adminVerifyUser = asyncHandler(async (req, res) => {
   const { userId, status } = req.body;
   const user = await User.findById(userId);
@@ -196,13 +349,13 @@ const adminVerifyUser = asyncHandler(async (req, res) => {
   res.json({ success: true, message: `User status: ${status}` });
 });
 
-// 7. GET PROFILE
+// 10. GET PROFILE
 const getUserProfile = asyncHandler(async (req, res) => {
   const user = await User.findById(req.user.userId);
   res.json({ success: true, data: user });
 });
 
-// 8. UPDATE PROFILE
+// 11. UPDATE PROFILE
 const updateProfile = asyncHandler(async (req, res) => {
   const { name, phone } = req.body;
   const updates = {};
@@ -215,135 +368,16 @@ const updateProfile = asyncHandler(async (req, res) => {
   res.json({ success: true, message: "Profile updated", data: user });
 });
 
-// 9. CHANGE PASSWORD (FIXED - DIRECT WRITE)
-const changePassword = asyncHandler(async (req, res) => {
-  const { currentPassword, newPassword } = req.body;
-  const userId = req.user.userId;
-
-  console.log(`🔐 Attempting password change for User ID: ${userId}`);
-
-  // 1. Get user with password explicitly
-  const user = await User.findById(userId).select("+password");
-
-  if (!user) {
-    console.log("❌ User not found");
-    return res.status(404).json({ success: false, message: "User not found" });
-  }
-
-  // 2. Verify Old Password
-  const isMatch = await bcrypt.compare(currentPassword, user.password);
-  if (!isMatch) {
-    console.log("❌ Incorrect current password");
-    return res
-      .status(401)
-      .json({ success: false, message: "Current password is incorrect" });
-  }
-
-  // 3. Hash New Password
-  // Important: 12 rounds is standard
-  const hashedPassword = await bcrypt.hash(newPassword, 12);
-
-  // 4. FORCE UPDATE using updateOne
-  // This bypasses Mongoose validation/hooks and talks directly to MongoDB driver
-  const result = await User.updateOne(
-    { _id: userId },
-    { $set: { password: hashedPassword } },
-  );
-
-  console.log("✅ MongoDB Update Result:", result);
-
-  if (result.modifiedCount === 0) {
-    console.log("⚠️ Password matched but DB did not report a modification.");
-    // This happens if new password is same as old (hashed), but we still return success
-  }
-
-  res.json({
-    success: true,
-    message: "Password changed successfully",
-  });
-});
-
-// 10. FORGOT PASSWORD (OTP Version)
-const forgotPassword = asyncHandler(async (req, res) => {
-  const { email } = req.body;
-  const emailLower = email.toLowerCase();
-
-  const user = await User.findOne({ email: emailLower });
-
-  if (!user) {
-    // Return success to prevent email enumeration attacks
-    return res.json({ success: true, message: "If email exists, code sent." });
-  }
-
-  // Generate 6-digit Code
-  const otp = EmailService.generateOTP();
-  const hashedOTP = await bcrypt.hash(otp, 10);
-
-  // Force Update Database
-  await User.updateOne(
-    { _id: user._id },
-    {
-      resetPasswordToken: hashedOTP,
-      resetPasswordExpires: Date.now() + 10 * 60 * 1000, // 10 mins
-    },
-  );
-
-  try {
-    await EmailService.sendPasswordResetEmail(emailLower, otp);
-    res.json({ success: true, message: "Reset code sent to email" });
-  } catch (error) {
-    console.log(`🔑 DEV MODE RESET OTP: ${otp}`);
-    res.json({ success: true, message: "Dev Mode: Check logs for OTP" });
-  }
-});
-
-// 11. RESET PASSWORD (OTP Version)
-const resetPassword = asyncHandler(async (req, res) => {
-  const { email, otp, newPassword } = req.body; // Changed from userId/token to email/otp
-
-  const user = await User.findOne({ email: email.toLowerCase() }).select(
-    "+resetPasswordToken +resetPasswordExpires",
-  );
-
-  if (
-    !user ||
-    !user.resetPasswordToken ||
-    user.resetPasswordExpires < Date.now()
-  ) {
-    return res
-      .status(400)
-      .json({ success: false, message: "Invalid or expired code" });
-  }
-
-  const isValid = await bcrypt.compare(otp, user.resetPasswordToken);
-  if (!isValid) {
-    return res.status(400).json({ success: false, message: "Invalid code" });
-  }
-
-  const hashedPassword = await bcrypt.hash(newPassword, 12);
-
-  // Force Update Password
-  await User.updateOne(
-    { _id: user._id },
-    {
-      password: hashedPassword,
-      $unset: { resetPasswordToken: 1, resetPasswordExpires: 1 },
-    },
-  );
-
-  res.json({ success: true, message: "Password reset successful" });
-});
-
 module.exports = {
   createUser,
   verifyEmailOTP,
   resendOTP,
   loginUser,
+  forgotPassword,
+  resetPassword,
+  changePassword,
   requestVerification,
   adminVerifyUser,
   getUserProfile,
   updateProfile,
-  changePassword,
-  forgotPassword,
-  resetPassword,
 };
