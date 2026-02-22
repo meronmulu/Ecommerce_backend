@@ -4,14 +4,17 @@ const User = require("../models/user.model");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 
-// Generate JWT
+// Utility function to generate JWT
 const generateToken = (userId, role) => {
   return jwt.sign({ userId, role }, process.env.JWT_SECRET, {
     expiresIn: "7d",
   });
 };
 
-const asyncHandler = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+// Utility function to handle async errors
+const asyncHandler = (fn) => (req, res, next) => {
+  Promise.resolve(fn(req, res, next)).catch(next);
+};
 
 // 1. REGISTER (Manual OTP Mode)
 const createUser = asyncHandler(async (req, res) => {
@@ -20,8 +23,9 @@ const createUser = asyncHandler(async (req, res) => {
 
   // Check if user exists
   const existingUser = await User.findOne({ email: emailLower });
+  
   if (existingUser) {
-    // If not verified, delete old record to allow retry
+    // If user exists but is NOT verified, delete them so we can try again
     if (!existingUser.isEmailVerified) {
       await User.findByIdAndDelete(existingUser._id);
     } else {
@@ -36,7 +40,7 @@ const createUser = asyncHandler(async (req, res) => {
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
   const hashedPassword = await bcrypt.hash(password, 12);
 
-  // Create User
+  // Create User with OTP
   const user = await User.create({
     name,
     email: emailLower,
@@ -47,15 +51,15 @@ const createUser = asyncHandler(async (req, res) => {
     isEmailVerified: false,
   });
 
-  // 🛑 LOG OTP TO CONSOLE (No Email Sending)
+  // 🛑 LOG OTP TO CONSOLE (Bypass Email)
   console.log("========================================");
   console.log(`🔐 MANUAL OTP for ${emailLower}: ${otp}`);
   console.log("========================================");
 
   res.status(201).json({
     success: true,
-    message: "User created. Check Server Logs/DB for OTP.",
-    userId: user._id, // Sending ID back so Frontend knows who to verify
+    message: "User created. Check Server Logs for OTP.",
+    userId: user._id, 
     requiresVerification: true
   });
 });
@@ -64,29 +68,30 @@ const createUser = asyncHandler(async (req, res) => {
 const verifyEmailOTP = asyncHandler(async (req, res) => {
   const { userId, otp } = req.body;
 
-  // Find user and explicitly select hidden OTP fields
+  // Find user and select hidden OTP fields
   const user = await User.findById(userId).select("+emailOTP +emailOTPExpires");
 
   if (!user) {
     return res.status(404).json({ success: false, message: "User not found" });
   }
 
-  // Verify OTP
+  // Verify OTP matches DB
   if (!user.emailOTP || user.emailOTP !== otp) {
-    return res.status(400).json({ success: false, message: "Invalid OTP" });
+    return res.status(400).json({ success: false, message: "Invalid verification code" });
   }
 
   if (Date.now() > user.emailOTPExpires) {
-    return res.status(400).json({ success: false, message: "OTP has expired" });
+    return res.status(400).json({ success: false, message: "Code has expired" });
   }
 
   // Mark Verified
   user.isEmailVerified = true;
   user.emailOTP = undefined;
   user.emailOTPExpires = undefined;
+  user.lastLoginAt = new Date();
   await user.save();
 
-  // Auto Login (Generate Token)
+  // Generate Token (Auto Login)
   const token = generateToken(user._id, user.role);
 
   res.json({
@@ -102,14 +107,14 @@ const loginUser = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
   
   const user = await User.findOne({ email: email.toLowerCase() })
-    .select("+password +isEmailVerified +emailOTP");
+    .select("+password +isEmailVerified +emailOTP +emailOTPExpires");
 
   if (!user || !(await bcrypt.compare(password, user.password))) {
-    return res.status(401).json({ success: false, message: "Invalid credentials" });
+    return res.status(401).json({ success: false, message: "Invalid email or password" });
   }
 
+  // If not verified, generate new OTP and force verification
   if (!user.isEmailVerified) {
-    // Generate new OTP if trying to login without verification
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     user.emailOTP = otp;
     user.emailOTPExpires = Date.now() + 60 * 60 * 1000;
@@ -119,7 +124,7 @@ const loginUser = asyncHandler(async (req, res) => {
 
     return res.status(403).json({
       success: false,
-      message: "Verify email first. Check logs for new OTP.",
+      message: "Please verify your email first.",
       requiresVerification: true,
       userId: user._id,
     });
@@ -135,6 +140,7 @@ const resendOTP = asyncHandler(async (req, res) => {
   const user = await User.findOne({ email: email.toLowerCase() });
 
   if (!user) return res.status(404).json({ success: false, message: "User not found" });
+  if (user.isEmailVerified) return res.status(400).json({ success: false, message: "Email already verified" });
 
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
   user.emailOTP = otp;
@@ -145,14 +151,6 @@ const resendOTP = asyncHandler(async (req, res) => {
 
   res.json({ success: true, message: "New OTP generated (Check Logs)" });
 });
-
-module.exports = {
-  createUser,
-  verifyEmailOTP,
-  loginUser,
-  resendOTP,
-  // Add other exports like requestVerification etc. as needed
-};
 
 module.exports = {
   createUser,
