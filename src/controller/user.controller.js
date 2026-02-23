@@ -287,7 +287,6 @@ const loginUser = asyncHandler(async (req, res) => {
   }
 });
 
-// 5. GET USER PROFILE
 const getUserProfile = asyncHandler(async (req, res) => {
   try {
     const user = await User.findById(req.user.userId);
