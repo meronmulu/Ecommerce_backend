@@ -1,154 +1,135 @@
 // server/services/emailService.js
 
 const nodemailer = require("nodemailer");
-const dns = require("dns");
 require("dotenv").config();
-
-// Force IPv4
-try {
-  dns.setDefaultResultOrder("ipv4first");
-} catch (e) {
-  console.log("DNS setting not available");
-}
 
 class EmailService {
   constructor() {
-    this.validateConfig();
-    this.createTransporter();
+    console.log("📧 Email Service Initialized");
+    console.log(`📧 Using email: ${process.env.EMAIL_USER || "Not set"}`);
+
+    this.transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST || "smtp.gmail.com",
+      port: parseInt(process.env.SMTP_PORT) || 587,
+      secure: process.env.SMTP_SECURE === "true",
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+      },
+      tls: {
+        rejectUnauthorized: false, // Allow self-signed certificates
+      },
+      debug: true, // Enable debug logs
+    });
   }
 
-  validateConfig() {
-    const required = ["EMAIL_USER", "EMAIL_PASS"];
-    const missing = required.filter((key) => !process.env[key]);
-
-    if (missing.length > 0) {
-      console.error("❌ Missing required email config:", missing);
-      return false;
-    }
-
-    console.log("✅ Email config validated");
-    console.log("📧 EMAIL_USER:", process.env.EMAIL_USER);
-    console.log("📧 EMAIL_PASS length:", process.env.EMAIL_PASS?.length);
-    return true;
-  }
-
-  createTransporter() {
-    // Try multiple configurations
-    this.transporters = [
-      // Config 1: Gmail SMTP with 587 (TLS)
-      nodemailer.createTransport({
-        host: "smtp.gmail.com",
-        port: 587,
-        secure: false,
-        requireTLS: true,
-        auth: {
-          user: process.env.EMAIL_USER,
-          pass: process.env.EMAIL_PASS,
-        },
-        tls: {
-          rejectUnauthorized: false,
-          ciphers: "SSLv3",
-        },
-      }),
-
-      // Config 2: Gmail SMTP with 465 (SSL)
-      nodemailer.createTransport({
-        host: "smtp.gmail.com",
-        port: 465,
-        secure: true,
-        auth: {
-          user: process.env.EMAIL_USER,
-          pass: process.env.EMAIL_PASS,
-        },
-        tls: {
-          rejectUnauthorized: false,
-        },
-      }),
-
-      // Config 3: Direct connection
-      nodemailer.createTransport({
-        service: "gmail",
-        auth: {
-          user: process.env.EMAIL_USER,
-          pass: process.env.EMAIL_PASS,
-        },
-      }),
-    ];
-
-    this.currentTransporter = 0;
-  }
-
-  async testConnection() {
-    for (let i = 0; i < this.transporters.length; i++) {
-      try {
-        console.log(`🔌 Testing transporter ${i + 1}...`);
-        await this.transporters[i].verify();
-        console.log(`✅ Transporter ${i + 1} works!`);
-        this.currentTransporter = i;
-        return true;
-      } catch (error) {
-        console.log(`❌ Transporter ${i + 1} failed:`, error.message);
-      }
-    }
-    return false;
-  }
-
-  async sendEmail(to, subject, htmlContent, textContent) {
-    // Test connection if first attempt
-    if (this.currentTransporter === 0) {
-      await this.testConnection();
-    }
-
-    const mailOptions = {
-      from: `"Used Tech Market" <${process.env.EMAIL_USER}>`,
-      to: to,
-      subject: subject,
-      html: htmlContent,
-      text: textContent,
-    };
-
-    // Try all transporters until one works
-    for (let i = this.currentTransporter; i < this.transporters.length; i++) {
-      try {
-        console.log(`📧 Attempting to send via transporter ${i + 1}...`);
-        const info = await this.transporters[i].sendMail(mailOptions);
-        console.log(`✅ Email sent via transporter ${i + 1}!`);
-        console.log("📧 Message ID:", info.messageId);
-        this.currentTransporter = i;
-        return { success: true, messageId: info.messageId };
-      } catch (error) {
-        console.log(`❌ Transporter ${i + 1} send failed:`, error.message);
-
-        // If this is the last transporter, throw error
-        if (i === this.transporters.length - 1) {
-          throw new Error(
-            `All email transporters failed. Last error: ${error.message}`,
-          );
-        }
-      }
-    }
-  }
-
+  /**
+   * Generate a 6-digit OTP
+   */
   generateOTP() {
     return Math.floor(100000 + Math.random() * 900000).toString();
   }
 
+  /**
+   * Send registration OTP email
+   */
   async sendOTPEmail(email, otp, userName = "User") {
-    const subject = "🔐 Verify Your Email - Used Tech Market";
+    const mailOptions = {
+      from: `"Used Tech Market" <${process.env.EMAIL_USER}>`,
+      to: email,
+      subject: "🔐 Verify Your Email - Used Tech Market",
+      html: this.getRegistrationTemplate(otp, userName),
+      text: `Your verification code is: ${otp}. This code will expire in 10 minutes.`,
+    };
 
-    const htmlContent = `
+    return this._sendMail(mailOptions);
+  }
+
+  /**
+   * Send password reset OTP email
+   */
+  async sendPasswordResetEmail(email, otp, userName = "User") {
+    const mailOptions = {
+      from: `"Used Tech Market" <${process.env.EMAIL_USER}>`,
+      to: email,
+      subject: "🔑 Reset Your Password - Used Tech Market",
+      html: this.getResetTemplate(otp, userName),
+      text: `Your password reset code is: ${otp}. This code will expire in 10 minutes.`,
+    };
+
+    return this._sendMail(mailOptions);
+  }
+
+  /**
+   * Core email sending function
+   */
+  async _sendMail(mailOptions) {
+    try {
+      console.log(`📧 Attempting to send email to: ${mailOptions.to}`);
+
+      const info = await this.transporter.sendMail(mailOptions);
+
+      console.log(`✅ Email sent successfully to: ${mailOptions.to}`);
+      console.log(`📧 Message ID: ${info.messageId}`);
+
+      return { success: true, messageId: info.messageId };
+    } catch (error) {
+      console.error("❌ Email sending failed:");
+      console.error(`   Error: ${error.message}`);
+      console.error(`   Code: ${error.code}`);
+      console.error(`   Command: ${error.command}`);
+
+      // Don't throw - just log the error
+      // This allows the app to continue even if email fails
+      return {
+        success: false,
+        error: error.message,
+        code: error.code,
+      };
+    }
+  }
+
+  /**
+   * Verify OTP
+   */
+  verifyOTP(storedOTP, storedExpiry, userOTP) {
+    if (!storedOTP || !storedExpiry) {
+      return {
+        valid: false,
+        message: "No OTP found. Please request a new one.",
+      };
+    }
+
+    if (new Date() > new Date(storedExpiry)) {
+      return {
+        valid: false,
+        message: "OTP has expired. Please request a new one.",
+      };
+    }
+
+    if (storedOTP !== userOTP) {
+      return { valid: false, message: "Invalid OTP. Please try again." };
+    }
+
+    return { valid: true, message: "OTP verified successfully" };
+  }
+
+  /**
+   * Registration email template
+   */
+  getRegistrationTemplate(otp, userName) {
+    return `
       <!DOCTYPE html>
       <html>
       <head>
         <meta charset="UTF-8">
         <style>
-          body { font-family: Arial, sans-serif; background: #f4f4f4; padding: 20px; }
-          .container { max-width: 600px; margin: 0 auto; background: white; border-radius: 10px; padding: 30px; }
+          body { font-family: Arial, sans-serif; background: #f4f4f4; margin: 0; padding: 20px; }
+          .container { max-width: 600px; margin: 0 auto; background: white; border-radius: 10px; padding: 30px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
           .header { text-align: center; margin-bottom: 30px; }
           .logo { font-size: 24px; font-weight: bold; color: #00838F; }
-          .otp-code { background: #e8f5e9; border: 2px solid #00838F; border-radius: 8px; padding: 20px; text-align: center; margin: 30px 0; }
-          .otp-code h1 { font-size: 48px; letter-spacing: 5px; color: #00838F; margin: 0; }
-          .warning { background: #fff3e0; border-left: 4px solid #ff9800; padding: 15px; margin: 20px 0; }
+          .otp-box { background: #e8f5e9; border: 2px solid #00838F; border-radius: 8px; padding: 20px; text-align: center; margin: 30px 0; }
+          .otp-code { font-size: 48px; letter-spacing: 5px; color: #00838F; margin: 0; }
           .footer { text-align: center; margin-top: 30px; font-size: 12px; color: #999; }
         </style>
       </head>
@@ -158,40 +139,37 @@ class EmailService {
             <div class="logo">🛡️ Used Tech Market</div>
           </div>
           <p>Hello ${userName},</p>
-          <p>Your verification code is:</p>
-          <div class="otp-code">
-            <h1>${otp}</h1>
+          <p>Thank you for registering! Your verification code is:</p>
+          <div class="otp-box">
+            <div class="otp-code">${otp}</div>
           </div>
-          <p>This code expires in <strong>10 minutes</strong>.</p>
-          <div class="warning">
-            <strong>⚠️ Never share this code with anyone.</strong>
+          <p>This code will expire in <strong>10 minutes</strong>.</p>
+          <p>If you didn't request this, please ignore this email.</p>
+          <div class="footer">
+            <p>© ${new Date().getFullYear()} Used Tech Market</p>
           </div>
         </div>
       </body>
       </html>
     `;
-
-    const textContent = `Your verification code is: ${otp}. It expires in 10 minutes.`;
-
-    return this.sendEmail(email, subject, htmlContent, textContent);
   }
 
-  async sendPasswordResetEmail(email, otp, userName = "User") {
-    const subject = "🔑 Reset Your Password - Used Tech Market";
-
-    const htmlContent = `
+  /**
+   * Password reset email template
+   */
+  getResetTemplate(otp, userName) {
+    return `
       <!DOCTYPE html>
       <html>
       <head>
         <meta charset="UTF-8">
         <style>
-          body { font-family: Arial, sans-serif; background: #f4f4f4; padding: 20px; }
-          .container { max-width: 600px; margin: 0 auto; background: white; border-radius: 10px; padding: 30px; }
+          body { font-family: Arial, sans-serif; background: #f4f4f4; margin: 0; padding: 20px; }
+          .container { max-width: 600px; margin: 0 auto; background: white; border-radius: 10px; padding: 30px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
           .header { text-align: center; margin-bottom: 30px; }
           .logo { font-size: 24px; font-weight: bold; color: #d9534f; }
-          .otp-code { background: #fee; border: 2px solid #d9534f; border-radius: 8px; padding: 20px; text-align: center; margin: 30px 0; }
-          .otp-code h1 { font-size: 48px; letter-spacing: 5px; color: #d9534f; margin: 0; }
-          .warning { background: #fff3e0; border-left: 4px solid #ff9800; padding: 15px; margin: 20px 0; }
+          .otp-box { background: #fee; border: 2px solid #d9534f; border-radius: 8px; padding: 20px; text-align: center; margin: 30px 0; }
+          .otp-code { font-size: 48px; letter-spacing: 5px; color: #d9534f; margin: 0; }
           .footer { text-align: center; margin-top: 30px; font-size: 12px; color: #999; }
         </style>
       </head>
@@ -201,35 +179,19 @@ class EmailService {
             <div class="logo">🔑 Used Tech Market</div>
           </div>
           <p>Hello ${userName},</p>
-          <p>Use the code below to reset your password:</p>
-          <div class="otp-code">
-            <h1>${otp}</h1>
+          <p>We received a request to reset your password. Your code is:</p>
+          <div class="otp-box">
+            <div class="otp-code">${otp}</div>
           </div>
-          <p>This code expires in <strong>10 minutes</strong>.</p>
-          <div class="warning">
-            <strong>⚠️ If you didn't request this, ignore this email.</strong>
+          <p>This code will expire in <strong>10 minutes</strong>.</p>
+          <p>If you didn't request this, please ignore this email.</p>
+          <div class="footer">
+            <p>© ${new Date().getFullYear()} Used Tech Market</p>
           </div>
         </div>
       </body>
       </html>
     `;
-
-    const textContent = `Your password reset code is: ${otp}. It expires in 10 minutes.`;
-
-    return this.sendEmail(email, subject, htmlContent, textContent);
-  }
-
-  verifyOTP(storedOTP, storedExpiry, userOTP) {
-    if (!storedOTP || !storedExpiry) {
-      return { valid: false, message: "No OTP found" };
-    }
-    if (new Date() > new Date(storedExpiry)) {
-      return { valid: false, message: "OTP expired" };
-    }
-    if (storedOTP !== userOTP) {
-      return { valid: false, message: "Invalid OTP" };
-    }
-    return { valid: true, message: "Verified" };
   }
 }
 
