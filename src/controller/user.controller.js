@@ -37,7 +37,7 @@ const register = asyncHandler(async (req, res) => {
     emailOTP: otp,
     emailOTPExpires: Date.now() + 10 * 60 * 1000,
     isEmailVerified: false,
-    role: "USER", // Add default role explicitly
+    role: "USER",
   });
 
   console.log(`🔑 OTP for ${emailLower}: ${otp}`);
@@ -95,6 +95,7 @@ const verifyEmail = asyncHandler(async (req, res) => {
       role: user.role,
       isEmailVerified: user.isEmailVerified,
       walletBalance: user.walletBalance,
+      kyc: user.kyc,
     },
   });
 });
@@ -125,8 +126,7 @@ const googleLogin = asyncHandler(async (req, res) => {
         Math.random().toString(36).slice(-8);
       const hashedPassword = await bcrypt.hash(randomPassword, 12);
 
-      // ✅ FIXED: Changed "user" to "USER" (uppercase to match enum)
-      user = await User.create({
+       user = await User.create({
         name: name || "Google User",
         email: email,
         password: hashedPassword,
@@ -151,6 +151,7 @@ const googleLogin = asyncHandler(async (req, res) => {
         role: user.role,
         isEmailVerified: user.isEmailVerified,
         walletBalance: user.walletBalance,
+        kyc: user.kyc,
       },
     });
   } catch (error) {
@@ -266,6 +267,7 @@ const login = asyncHandler(async (req, res) => {
       role: user.role,
       isEmailVerified: user.isEmailVerified,
       walletBalance: user.walletBalance,
+      kyc: user.kyc,
     },
   });
 });
@@ -282,6 +284,11 @@ const updateProfile = asyncHandler(async (req, res) => {
   const updates = {};
   if (name) updates.name = name;
   if (phone) updates.phone = phone;
+
+  // Handle Profile Image Upload (Uses req.file from multer single)
+  if (req.file) {
+    updates.profileImage = req.file.path.replace(/\\/g, "/").replace("src/", "");
+  }
 
   const user = await User.findByIdAndUpdate(req.user.userId, updates, {
     new: true,
@@ -437,6 +444,38 @@ const resetPassword = asyncHandler(async (req, res) => {
   });
 });
 
+const requestVerification = asyncHandler(async (req, res) => {
+  // Check if all files exist
+  // Note: req.files is an object now, not req.file
+  if (!req.files || !req.files['frontImage'] || !req.files['backImage'] || !req.files['faceImage']) {
+    return res.status(400).json({ success: false, message: "Please upload Front ID, Back ID, and a Selfie." });
+  }
+
+  const userId = req.user.userId;
+  
+  // Helper to get path safely
+  const getPath = (key) => req.files[key][0].path.replace(/\\/g, "/").replace("src/", "");
+
+  const user = await User.findByIdAndUpdate(
+    userId,
+    {
+      "kyc.status": "PENDING",
+      "kyc.frontImage": getPath('frontImage'),
+      "kyc.backImage": getPath('backImage'),
+      "kyc.faceImage": getPath('faceImage'),
+      "kyc.submittedAt": new Date(),
+      "kyc.rejectionReason": null
+    },
+    { new: true }
+  );
+
+  res.json({
+    success: true,
+    message: "Verification documents submitted successfully",
+    data: { kycStatus: user.kyc.status }
+  });
+});
+
 module.exports = {
   register,
   verifyEmail,
@@ -448,4 +487,5 @@ module.exports = {
   changePassword,
   forgotPassword,
   resetPassword,
+  requestVerification,
 };

@@ -15,6 +15,7 @@ const userController = require("../controller/user.controller");
   resetPassword,
 } = require("../controller/user.controller");
 const { authenticate } = require("../middlewares/authMiddleware");
+const upload = require("../middlewares/upload");
 
 // Test endpoint
 router.get("/test", (req, res) => {
@@ -36,8 +37,19 @@ router.post("/reset-password", resetPassword);
 
 // Protected routes (auth required)
 router.get("/me", authenticate, getProfile);
-router.put("/profile", authenticate, updateProfile);
+router.put("/profile", authenticate, upload.single('profileImage'), updateProfile);
 router.post("/change-password", authenticate, changePassword);
+router.post(
+  "/request-verification", 
+  authenticate, 
+  // CHANGED: Accept 3 specific files
+  upload.fields([
+    { name: 'frontImage', maxCount: 1 },
+    { name: 'backImage', maxCount: 1 },
+    { name: 'faceImage', maxCount: 1 }
+  ]), 
+  userController.requestVerification
+);
  
 
 module.exports = router;

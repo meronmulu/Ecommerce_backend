@@ -2,85 +2,39 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 
-// Ensure upload directories exist
-const createUploadDirs = () => {
-  const dirs = ["src/uploads/users", "src/uploads/products", "src/uploads/ids"];
-
-  dirs.forEach((dir) => {
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-  });
-};
-
-createUploadDirs();
+const uploadDir = "src/uploads/";
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
 
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    let uploadPath = "src/uploads/";
-
-    // Determine upload path based on route
-    if (req.baseUrl.includes("product")) {
-      uploadPath += "products";
-    } else if (req.path.includes("request-verification")) {
-      uploadPath += "ids";
-    } else {
-      uploadPath += "users";
-    }
-
-    cb(null, uploadPath);
+  destination: function (req, file, cb) {
+    cb(null, uploadDir);
   },
-  filename: (req, file, cb) => {
+  filename: function (req, file, cb) {
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    const ext = path.extname(file.originalname);
-    cb(null, `${req.user?.userId || "anonymous"}-${uniqueSuffix}${ext}`);
+    cb(null, file.fieldname + "-" + uniqueSuffix + path.extname(file.originalname));
   },
 });
 
 const fileFilter = (req, file, cb) => {
-  const allowedTypes = /jpeg|jpg|png|gif|webp/;
-  const extname = allowedTypes.test(
-    path.extname(file.originalname).toLowerCase(),
-  );
-  const mimetype = allowedTypes.test(file.mimetype);
+  console.log(`📂 Upload attempt: ${file.originalname} (${file.mimetype})`);
+  
+  const isImageMime = file.mimetype.startsWith("image/");
+  const isImageExt = /\.(jpg|jpeg|png|gif|webp)$/i.test(file.originalname);
 
-  if (mimetype && extname) {
-    return cb(null, true);
+  if (isImageMime || isImageExt) {
+    cb(null, true);
   } else {
-    cb(new Error("Only image files are allowed (jpeg, jpg, png, gif, webp)"));
+    console.error(`❌ Rejected file: ${file.originalname} - ${file.mimetype}`);
+    cb(new Error("Only image files are allowed!"), false);
   }
 };
 
-const upload = multer({
-  storage,
-  fileFilter,
-  limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB limit
-    files: 10, // Max 10 files
-  },
+const upload = multer({ 
+  storage: storage,
+  fileFilter: fileFilter,
+  limits: { fileSize: 5 * 1024 * 1024 } 
 });
-
-// Error handling middleware for multer
-upload.handleMulterError = (err, req, res, next) => {
-  if (err instanceof multer.MulterError) {
-    if (err.code === "LIMIT_FILE_SIZE") {
-      return res.status(400).json({
-        success: false,
-        message: "File too large. Maximum size is 5MB",
-      });
-    }
-    if (err.code === "LIMIT_FILE_COUNT") {
-      return res.status(400).json({
-        success: false,
-        message: "Too many files. Maximum is 10 files",
-      });
-    }
-    return res.status(400).json({
-      success: false,
-      message: err.message,
-    });
-  }
-  next(err);
-};
 
 module.exports = upload;
