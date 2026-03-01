@@ -286,10 +286,11 @@ const getProfile = asyncHandler(async (req, res) => {
 
 // 7. UPDATE PROFILE
 const updateProfile = asyncHandler(async (req, res) => {
-  const { name, phone } = req.body;
+  const { name, phone, location } = req.body;
   const updates = {};
   if (name) updates.name = name;
   if (phone) updates.phone = phone;
+  if (location) updates.location = location;
 
   // Handle Profile Image Upload (Uses req.file from multer single)
   if (req.file) {

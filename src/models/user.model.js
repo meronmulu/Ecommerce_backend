@@ -12,6 +12,7 @@ const userSchema = new mongoose.Schema(
     emailOTPExpires: { type: Date, select: false },
     phone: { type: String },
     profileImage: { type: String },
+    location: { type: String },
 
     resetPasswordToken: { type: String, select: false },
     resetPasswordExpires: { type: Date, select: false },

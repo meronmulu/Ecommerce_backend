@@ -1,6 +1,7 @@
 // server/controller/product.controller.js
 
 const Product = require("../models/product.model");
+const User = require("../models/user.model");
 
 // CREATE PRODUCT (The Sell Wizard Endpoint)
 const createProduct = async (req, res) => {
@@ -34,6 +35,7 @@ const createProduct = async (req, res) => {
     const imagePaths = req.files.map((file) => file.path.replace(/\\/g, "/"));
 
     // 4. Create Database Entry
+    const seller = await User.findById(req.user.userId);
     const product = await Product.create({
       sellerId: req.user.userId, // From Auth Token
       category,
@@ -43,7 +45,7 @@ const createProduct = async (req, res) => {
       price: Number(price), // Ensure number type
       description,
       images: imagePaths,
-      location: location || "Addis Ababa",
+      location: location || (seller ? seller.location : "Addis Ababa"),
       // Group the specs
       specs: {
         storage,
@@ -86,7 +88,7 @@ const getProducts = async (req, res) => {
     }
 
     const products = await Product.find(query)
-      .populate("sellerId", "name role isEmailVerified") // Get seller info
+      .populate("sellerId", "name role isEmailVerified location") // Get seller info
       .sort({ createdAt: -1 }); // Newest first
 
     res.json({ success: true, data: products });
@@ -100,7 +102,7 @@ const getProductById = async (req, res) => {
   try {
     const product = await Product.findById(req.params.id).populate(
       "sellerId",
-      "name role isEmailVerified phone",
+      "name role isEmailVerified phone location",
     );
 
     if (!product) {
