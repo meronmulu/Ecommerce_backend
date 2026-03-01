@@ -1,3 +1,5 @@
+// server/models/product.model.js
+
 const mongoose = require("mongoose");
 
 const productSchema = new mongoose.Schema(
@@ -7,48 +9,68 @@ const productSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
-
+    // Matches Step 1 UI
     category: {
       type: String,
-      enum: ["mobile", "tablet", "laptop"],
-      lowercase: true,
-      trim: true,
       required: true,
+      lowercase: true,
+      trim: true, // e.g. "mobile", "laptop"
     },
+    // Matches Step 2 UI
+    brand: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    model: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    // Matches Step 3 UI
     condition: {
       type: String,
-      enum: ["new", "like new", "used", "defective"],
-      lowercase: true,
-      trim: true,
       required: true,
+      // Using flexible string to match UI values like "Like New", "Good"
     },
-    title: String,
-    brand: String,
-    model: { type: String, required: true, trim: true },
-    description: String,
-    price: { type: Number, required: true },
-
-    // 3 Images: Front, Back, Info
+    // Group all technical details here
+    specs: {
+      storage: String, // "256GB"
+      ram: String, // "8GB"
+      processor: String, // "Intel i7" (Laptop only)
+      core: String, // "i5" (Laptop only)
+      generation: String, // "11th Gen" (Laptop only)
+    },
+    // Matches Step 5 UI
+    price: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+    description: {
+      type: String,
+      trim: true,
+    },
+    // Matches Step 4 UI (Image URLs)
     images: {
       type: [String],
-      required: true,
-      validate: {
-        validator: (v) => v.length === 3,
-        message: "Exactly 3 images required (Front, Back, Info)",
-      },
+      validate: [arrayLimit, "{PATH} exceeds the limit of 10"],
     },
-
     status: {
       type: String,
       enum: ["ACTIVE", "SOLD", "HIDDEN"],
       default: "ACTIVE",
+    },
+    location: {
+      type: String,
+      default: "Addis Ababa", // Default for MVP
     },
   },
   { timestamps: true },
 );
 
 function arrayLimit(val) {
-  return val.length >= 0;
-} // Logic handled in controller
+  return val.length <= 10;
+}
 
 module.exports = mongoose.model("Product", productSchema);
