@@ -50,6 +50,7 @@ router.post(
   ]), 
   userController.requestVerification
 );
+router.patch("/fcm-token", authenticate, userController.updateFcmToken);
  
 
 module.exports = router;

@@ -13,6 +13,7 @@ const userSchema = new mongoose.Schema(
     phone: { type: String },
     profileImage: { type: String },
     location: { type: String },
+    fcmToken: { type: String },
 
     resetPasswordToken: { type: String, select: false },
     resetPasswordExpires: { type: Date, select: false },

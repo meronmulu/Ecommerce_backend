@@ -48,9 +48,8 @@ connectDB();
 // Routes
 app.use("/api/users", require("./src/routes/user.routes"));
 app.use("/api/products", require("./src/routes/product.routes"));
+app.use("/api/chat", require("./src/routes/chat.routes"));
 // app.use("/api/orders", require("./src/routes/order.routes"));
-// app.use("/api/payment", require("./src/routes/payment.routes"));
-// app.use("/api/chat", require("./src/routes/chat.routes"));
 // app.use("/api/withdrawals", require("./src/routes/withdrawal.routes"));
 
 // Root route

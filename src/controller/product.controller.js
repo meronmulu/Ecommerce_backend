@@ -70,8 +70,25 @@ const createProduct = async (req, res) => {
 // GET ALL PRODUCTS (For Home/Search Page)
 const getProducts = async (req, res) => {
   try {
-    const { category, search } = req.query;
-    let query = { status: "ACTIVE" };
+    const { category, search, status, sort, limit, sellerId, location } = req.query;
+    
+    // Default to ACTIVE if status not provided, but allow "ALL" or specific statuses
+    let query = {};
+    if (status && status.toUpperCase() !== "ALL") {
+      query.status = status.toUpperCase();
+    } else if (!status) {
+      query.status = "ACTIVE";
+    }
+
+    // Filter by Seller
+    if (sellerId) {
+      query.sellerId = sellerId;
+    }
+
+    // Filter by Location
+    if (location) {
+      query.location = { $regex: location, $options: "i" };
+    }
 
     // Filter by Category
     if (category) {
@@ -87,9 +104,22 @@ const getProducts = async (req, res) => {
       ];
     }
 
+    // Determine sort order
+    let sortObj = { createdAt: -1 }; // Default: Newest first
+    if (sort === "sold") {
+      sortObj = { updatedAt: -1 }; // Most recently updated (sold) first
+    } else if (sort === "trending") {
+      sortObj = { views: -1, createdAt: -1 }; 
+
+    }
+
+    // Determine limit
+    const queryLimit = limit ? parseInt(limit, 10) : 0; // 0 means no limit in Mongoose
+
     const products = await Product.find(query)
-      .populate("sellerId", "name role isEmailVerified location") // Get seller info
-      .sort({ createdAt: -1 }); // Newest first
+      .populate("sellerId", "name role isEmailVerified location profileImage") // Added profileImage
+      .sort(sortObj)
+      .limit(queryLimit);
 
     res.json({ success: true, data: products });
   } catch (error) {
@@ -102,7 +132,7 @@ const getProductById = async (req, res) => {
   try {
     const product = await Product.findById(req.params.id).populate(
       "sellerId",
-      "name role isEmailVerified phone location",
+      "name role isEmailVerified phone location profileImage",
     );
 
     if (!product) {

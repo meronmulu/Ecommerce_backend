@@ -483,6 +483,16 @@ const requestVerification = asyncHandler(async (req, res) => {
   });
 });
 
+const updateFcmToken = asyncHandler(async (req, res) => {
+  const { fcmToken } = req.body;
+  if (!fcmToken) {
+    return res.status(400).json({ success: false, message: "fcmToken is required" });
+  }
+
+  await User.findByIdAndUpdate(req.user.userId, { fcmToken });
+  res.json({ success: true, message: "FCM token updated" });
+});
+
 module.exports = {
   register,
   verifyEmail,
@@ -495,4 +505,5 @@ module.exports = {
   forgotPassword,
   resetPassword,
   requestVerification,
+  updateFcmToken,
 };
