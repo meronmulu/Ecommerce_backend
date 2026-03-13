@@ -1,5 +1,7 @@
+const mongoose = require("mongoose");
 const Message = require("../models/chat.model");
 const User = require("../models/user.model");
+const Product = require("../models/product.model");
 const admin = require("../config/firebase");
 
 // Helper to generate a consistent conversation ID
@@ -73,15 +75,15 @@ const sendMessage = async (req, res) => {
 // GET CONVERSATIONS (REST API)
 const getConversations = async (req, res) => {
   try {
-    const userId = req.user.userId;
+    const userId = new mongoose.Types.ObjectId(req.user.userId);
     
     // Aggregate to get unique conversations with the last message
     const conversations = await Message.aggregate([
       {
         $match: {
           $or: [
-            { senderId: new require("mongoose").Types.ObjectId(userId) },
-            { receiverId: new require("mongoose").Types.ObjectId(userId) }
+            { senderId: userId },
+            { receiverId: userId }
           ]
         }
       },
@@ -95,7 +97,7 @@ const getConversations = async (req, res) => {
               $cond: [
                 { $and: [
                   { $eq: ["$isRead", false] }, 
-                  { $eq: ["$receiverId", new require("mongoose").Types.ObjectId(userId)] }
+                  { $eq: ["$receiverId", userId] }
                 ]}, 
                 1, 
                 0
@@ -104,30 +106,65 @@ const getConversations = async (req, res) => {
           }
         }
       },
-      { $sort: { "lastMessage.createdAt": -1 } }
+      { $sort: { "lastMessage.createdAt": -1 } },
+      // Lookup for Sender
+      {
+        $lookup: {
+          from: "users",
+          localField: "lastMessage.senderId",
+          foreignField: "_id",
+          as: "sender"
+        }
+      },
+      { $unwind: "$sender" },
+      // Lookup for Receiver
+      {
+        $lookup: {
+          from: "users",
+          localField: "lastMessage.receiverId",
+          foreignField: "_id",
+          as: "receiver"
+        }
+      },
+      { $unwind: "$receiver" },
+      // Lookup for Product (Optional)
+      {
+        $lookup: {
+          from: "products",
+          localField: "lastMessage.productId",
+          foreignField: "_id",
+          as: "product"
+        }
+      },
+      { $unwind: { path: "$product", preserveNullAndEmptyArrays: true } },
+      {
+        $project: {
+          conversationId: "$_id",
+          unreadCount: 1,
+          lastMessage: 1,
+          otherPerson: {
+            $cond: [
+              { $eq: ["$lastMessage.senderId", userId] },
+              {
+                _id: "$receiver._id",
+                name: "$receiver.name",
+                profileImage: "$receiver.profileImage",
+                role: "$receiver.role"
+              },
+              {
+                _id: "$sender._id",
+                name: "$sender.name",
+                profileImage: "$sender.profileImage",
+                role: "$sender.role"
+              }
+            ]
+          },
+          product: "$product"
+        }
+      }
     ]);
 
-    // Populate participant info
-    const populatedConversations = await Promise.all(conversations.map(async (conv) => {
-      const otherPersonId = conv.lastMessage.senderId.toString() === userId 
-        ? conv.lastMessage.receiverId 
-        : conv.lastMessage.senderId;
-      
-      const otherPerson = await User.findById(otherPersonId).select("name profileImage role");
-      const product = conv.lastMessage.productId 
-        ? await require("../models/product.model").findById(conv.lastMessage.productId).select("brand model price images")
-        : null;
-
-      return {
-        conversationId: conv._id,
-        otherPerson,
-        product,
-        lastMessage: conv.lastMessage,
-        unreadCount: conv.unreadCount
-      };
-    }));
-
-    res.json({ success: true, data: populatedConversations });
+    res.json({ success: true, data: conversations });
   } catch (error) {
     console.error("Get Conversations Error:", error);
     res.status(500).json({ success: false, message: error.message });
