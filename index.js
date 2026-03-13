@@ -87,7 +87,7 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
+server.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📧 Email configured for: ${process.env.EMAIL_USER}`);
   console.log(`🔗 Test endpoint: http://localhost:${PORT}/api/users/test`);
