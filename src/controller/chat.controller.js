@@ -13,7 +13,7 @@ const getConversationId = (id1, id2, productId) => {
 // SEND MESSAGE (Hybrid: DB + Socket + FCM)
 const sendMessage = async (req, res) => {
   try {
-    const { receiverId, productId, message, type } = req.body;
+    const { receiverId, productId, message, type, tempId } = req.body;
     const senderId = req.user.userId;
 
     if (!receiverId || !message) {
@@ -30,6 +30,7 @@ const sendMessage = async (req, res) => {
       conversationId,
       message,
       type: type || "text",
+      tempId,
     });
 
     // Populate sender info for the frontend
@@ -92,6 +93,7 @@ const getConversations = async (req, res) => {
         $group: {
           _id: "$conversationId",
           lastMessage: { $first: "$$ROOT" },
+          productId: { $first: "$productId" },
           unreadCount: {
             $sum: { 
               $cond: [
@@ -127,11 +129,11 @@ const getConversations = async (req, res) => {
         }
       },
       { $unwind: "$receiver" },
-      // Lookup for Product (Optional)
+      // Lookup for Product 
       {
         $lookup: {
           from: "products",
-          localField: "lastMessage.productId",
+          localField: "productId",
           foreignField: "_id",
           as: "product"
         }
@@ -142,6 +144,7 @@ const getConversations = async (req, res) => {
           conversationId: "$_id",
           unreadCount: 1,
           lastMessage: 1,
+          productId: 1,
           otherPerson: {
             $cond: [
               { $eq: ["$lastMessage.senderId", userId] },
@@ -159,7 +162,12 @@ const getConversations = async (req, res) => {
               }
             ]
           },
-          product: "$product"
+          product: {
+            _id: "$product._id",
+            title: "$product.title",
+            images: "$product.images",
+            thumbnail: { $arrayElemAt: ["$product.images", 0] }
+          }
         }
       }
     ]);
@@ -175,9 +183,15 @@ const getConversations = async (req, res) => {
 const getChatHistory = async (req, res) => {
   try {
     const { conversationId } = req.params;
+    const { productId } = req.query;
     const { page = 1, limit = 50 } = req.query;
 
-    const messages = await Message.find({ conversationId })
+    const query = { conversationId };
+    if (productId) {
+      query.productId = productId;
+    }
+
+    const messages = await Message.find(query)
       .populate("senderId", "name profileImage")
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
@@ -195,4 +209,29 @@ const getChatHistory = async (req, res) => {
   }
 };
 
-module.exports = { sendMessage, getConversations, getChatHistory };
+// DELETE CONVERSATION (REST API)
+const deleteConversation = async (req, res) => {
+  try {
+    const { conversationId } = req.params;
+    const userId = req.user.userId;
+
+    // Verify user is part of conversation
+    const message = await Message.findOne({ conversationId });
+    if (!message) {
+      return res.status(404).json({ success: false, message: "Conversation not found" });
+    }
+
+    if (message.senderId.toString() !== userId && message.receiverId.toString() !== userId) {
+      return res.status(403).json({ success: false, message: "Unauthorized" });
+    }
+
+    await Message.deleteMany({ conversationId });
+
+    res.json({ success: true, message: "Conversation deleted successfully" });
+  } catch (error) {
+    console.error("Delete Conversation Error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+module.exports = { sendMessage, getConversations, getChatHistory, deleteConversation };

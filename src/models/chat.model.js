@@ -8,6 +8,7 @@ const messageSchema = new mongoose.Schema(
     message: String,
     type: { type: String, enum: ["text", "image"], default: "text" },
     isRead: { type: Boolean, default: false },
+    tempId: { type: String },
   },
   { timestamps: true },
 );
