@@ -145,4 +145,109 @@ const getProductById = async (req, res) => {
   }
 };
 
-module.exports = { createProduct, getProducts, getProductById };
+// DELETE PRODUCT
+const deleteProduct = async (req, res) => {
+  try {
+    const product = await Product.findById(req.params.id);
+
+    if (!product) {
+      return res.status(404).json({ message: "Product not found" });
+    }
+
+    // Check ownership
+    if (product.sellerId.toString() !== req.user.userId) {
+      return res.status(403).json({ message: "You are not authorized to delete this product" });
+    }
+
+    await Product.findByIdAndDelete(req.params.id);
+
+    res.json({ success: true, message: "Product deleted successfully" });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// UPDATE PRODUCT STATUS
+const updateProductStatus = async (req, res) => {
+  try {
+    const { status } = req.body;
+    const product = await Product.findById(req.params.id);
+
+    if (!product) {
+      return res.status(404).json({ message: "Product not found" });
+    }
+
+    // Check ownership
+    if (product.sellerId.toString() !== req.user.userId) {
+      return res.status(403).json({ message: "You are not authorized to update this product" });
+    }
+
+    product.status = status.toUpperCase();
+    await product.save();
+
+    res.json({ success: true, message: "Status updated successfully", data: product });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// UPDATE PRODUCT
+const updateProduct = async (req, res) => {
+  try {
+    const product = await Product.findById(req.params.id);
+
+    if (!product) {
+      return res.status(404).json({ message: "Product not found" });
+    }
+
+    // Check ownership
+    if (product.sellerId.toString() !== req.user.userId) {
+      return res.status(403).json({ message: "You are not authorized to update this product" });
+    }
+
+    // Update with allowed fields from body
+    const allowedFields = ['title', 'price', 'description', 'location', 'condition', 'category', 'brand', 'model'];
+    allowedFields.forEach(field => {
+      if (req.body[field] !== undefined) {
+        product[field] = req.body[field];
+      }
+    });
+
+    // Handle specs if provided (might be sent as a JSON string in Multipart)
+    let specs = req.body.specs;
+    if (typeof specs === 'string') {
+      try {
+        specs = json.parse(specs);
+      } catch (e) {
+         // Ignore if not JSON
+      }
+    }
+    if (specs) {
+      product.specs = { ...product.specs, ...specs };
+    }
+
+    // Handle Image Updates
+    if (req.files && req.files.length > 0) {
+      // For simplicity, we replace all images if any new ones are uploaded
+      // (Advanced version: support adding/removing specific images)
+      const imagePaths = req.files.map((file) => file.path.replace(/\\/g, "/"));
+      product.images = imagePaths;
+    }
+
+    await product.save();
+
+    res.json({ success: true, message: "Product updated successfully", data: product });
+  } catch (error) {
+    console.error("Update Product Error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+module.exports = {
+  createProduct,
+  getProducts,
+  getProductById,
+  deleteProduct,
+  updateProductStatus,
+  updateProduct,
+};
