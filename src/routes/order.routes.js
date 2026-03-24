@@ -9,12 +9,12 @@ const {
   completeOrder,
   getMyOrders,
 } = require("../controller/order.controller");
-const { authenticateUser } = require("../middlewares/authMiddleware");
+const { authenticate } = require("../middlewares/authMiddleware");
 
-router.post("/", authenticateUser, createOrder);
-router.get("/my", authenticateUser, getMyOrders);
-router.put("/:id/shipped", authenticateUser, markShipped);
-router.post("/verify-delivery", authenticateUser, confirmDelivery);
-router.put("/:id/complete", authenticateUser, completeOrder);
+router.post("/", authenticate, createOrder);
+router.get("/my", authenticate, getMyOrders);
+router.put("/:id/shipped", authenticate, markShipped);
+router.post("/verify-delivery", authenticate, confirmDelivery);
+router.put("/:id/complete", authenticate, completeOrder);
 
 module.exports = router;

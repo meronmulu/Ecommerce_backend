@@ -69,6 +69,16 @@ const productSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+// Compound indexes for common filter combinations
+productSchema.index({ category: 1, status: 1, createdAt: -1 });
+productSchema.index({ sellerId: 1, status: 1 });
+
+// Text index for search functionality
+productSchema.index(
+  { brand: "text", model: "text", description: "text" },
+  { weights: { brand: 10, model: 5, description: 1 } }
+);
+
 function arrayLimit(val) {
   return val.length <= 10;
 }

@@ -173,7 +173,7 @@ const getMyOrders = async (req, res) => {
     const orders = await Order.find({
       $or: [{ buyerId: req.user.userId }, { sellerId: req.user.userId }],
     })
-      .populate("productId", "title price images")
+      .populate("productId", "title brand model price images")
       .populate("buyerId", "name email")
       .populate("sellerId", "name email")
       .sort({ createdAt: -1 });

@@ -95,13 +95,9 @@ const getProducts = async (req, res) => {
       query.category = category.toLowerCase();
     }
 
-    // Search Logic (Regex)
+    // Search Logic (Text Search using Indexes)
     if (search) {
-      query.$or = [
-        { brand: { $regex: search, $options: "i" } },
-        { model: { $regex: search, $options: "i" } },
-        { description: { $regex: search, $options: "i" } },
-      ];
+      query.$text = { $search: search };
     }
 
     // Determine sort order
@@ -116,9 +112,23 @@ const getProducts = async (req, res) => {
     // Determine limit
     const queryLimit = limit ? parseInt(limit, 10) : 0; // 0 means no limit in Mongoose
 
-    const products = await Product.find(query)
-      .populate("sellerId", "name role isEmailVerified location profileImage") // Added profileImage
-      .sort(sortObj)
+    const products = await Product.find(query, {
+      // PROJECTION: Only return fields needed for the list view
+      title: 1, 
+      price: 1, 
+      images: { $slice: 1 }, // Only send the first image
+      category: 1,
+      brand: 1,
+      model: 1,
+      location: 1,
+      status: 1,
+      createdAt: 1,
+      sellerId: 1,
+      // If doing text search, include score for sorting
+      ...(search && { score: { $meta: "textScore" } }),
+    })
+      .populate("sellerId", "name profileImage location") 
+      .sort(search ? { score: { $meta: "textScore" } } : sortObj)
       .limit(queryLimit);
 
     res.json({ success: true, data: products });

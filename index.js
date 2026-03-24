@@ -49,8 +49,9 @@ connectDB();
 app.use("/api/users", require("./src/routes/user.routes"));
 app.use("/api/products", require("./src/routes/product.routes"));
 app.use("/api/chat", require("./src/routes/chat.routes"));
-// app.use("/api/orders", require("./src/routes/order.routes"));
-// app.use("/api/withdrawals", require("./src/routes/withdrawal.routes"));
+app.use("/api/orders", require("./src/routes/order.routes"));
+app.use("/api/withdrawals", require("./src/routes/withdrawal.routes"));
+app.use("/api/payments", require("./src/routes/payment.routes")); // Also adding payments which was missing
 
 // Root route
 app.get("/", (req, res) => {
