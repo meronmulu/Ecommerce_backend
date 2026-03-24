@@ -3,8 +3,8 @@
 const express = require("express");
 const router = express.Router();
 const { requestWithdrawal } = require("../controller/withdrawal.controller");
-const { authenticateUser } = require("../middlewares/authMiddleware");
+const { authenticate } = require("../middlewares/authMiddleware");
 
-router.post("/", authenticateUser, requestWithdrawal);
+router.post("/", authenticate, requestWithdrawal);
 
 module.exports = router;

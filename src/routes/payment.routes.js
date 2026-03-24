@@ -4,11 +4,13 @@ const express = require("express");
 const router = express.Router();
 const {
   initPayment,
+  initDeposit,
   chapaCallback,
 } = require("../controller/payment.controller");
-const { authenticateUser } = require("../middlewares/authMiddleware");
+const { authenticate } = require("../middlewares/authMiddleware");
 
-router.post("/init", authenticateUser, initPayment);
-router.post("/callback", chapaCallback); // This might not need auth
+router.post("/init", authenticate, initPayment);
+router.post("/init-deposit", authenticate, initDeposit);
+router.post("/callback", chapaCallback); 
 
 module.exports = router;
