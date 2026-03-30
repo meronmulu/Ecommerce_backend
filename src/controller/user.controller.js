@@ -11,6 +11,18 @@ const generateToken = (userId, role) => {
   });
 };
 
+const toPublicJSON = (user) => ({
+  _id: user._id,
+  name: user.name,
+  email: user.email,
+  role: user.role,
+  phone: user.phone,
+  profileImage: user.profileImage,
+  isEmailVerified: user.isEmailVerified,
+  walletBalance: user.walletBalance,
+  kyc: user.kyc,
+});
+
 const asyncHandler = (fn) => (req, res, next) => {
   Promise.resolve(fn(req, res, next)).catch(next);
 };
@@ -88,17 +100,7 @@ const verifyEmail = asyncHandler(async (req, res) => {
     success: true,
     message: "Email verified successfully",
     token,
-    user: {
-      _id: user._id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      phone: user.phone,
-      profileImage: user.profileImage,
-      isEmailVerified: user.isEmailVerified,
-      walletBalance: user.walletBalance,
-      kyc: user.kyc,
-    },
+    user: toPublicJSON(user),
   });
 });
 
@@ -146,17 +148,7 @@ const googleLogin = asyncHandler(async (req, res) => {
       success: true,
       message: "Google login successful",
       token,
-      user: {
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        phone: user.phone,
-        profileImage: user.profileImage,
-        isEmailVerified: user.isEmailVerified,
-        walletBalance: user.walletBalance,
-        kyc: user.kyc,
-      },
+      user: toPublicJSON(user),
     });
   } catch (error) {
     console.error("❌ Google Auth Error:", error.message);
@@ -264,23 +256,13 @@ const login = asyncHandler(async (req, res) => {
     success: true,
     message: "Login successful",
     token,
-    user: {
-      _id: user._id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      phone: user.phone,
-      profileImage: user.profileImage,
-      isEmailVerified: user.isEmailVerified,
-      walletBalance: user.walletBalance,
-      kyc: user.kyc,
-    },
+    user: toPublicJSON(user),
   });
 });
 
 // 6. GET PROFILE
 const getProfile = asyncHandler(async (req, res) => {
-  const user = await User.findById(req.user.userId);
+  const user = await User.findById(req.user.userId).lean();
   res.json({ success: true, data: user });
 });
 

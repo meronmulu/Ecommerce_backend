@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const cron = require("node-cron");
 const Order = require("../models/order.model");
 const User = require("../models/user.model");
@@ -17,22 +18,32 @@ const startEscrowJob = () => {
     });
 
     for (const order of expiredOrders) {
+      const session = await mongoose.startSession();
+      session.startTransaction();
       try {
         // 1. Give money to Seller (Atomic)
-        await User.findByIdAndUpdate(order.sellerId, {
-          $inc: { walletBalance: order.amount },
-        });
+        await User.findByIdAndUpdate(order.sellerId, 
+          { $inc: { walletBalance: order.amount } },
+          { session }
+        );
 
         // 2. Mark Product Sold
-        await Product.findByIdAndUpdate(order.productId, { status: "SOLD" });
+        await Product.findByIdAndUpdate(order.productId, 
+          { status: "SOLD" },
+          { session }
+        );
 
         // 3. Mark Order Completed
         order.status = "COMPLETED";
-        await order.save();
+        await order.save({ session });
 
+        await session.commitTransaction();
         console.log(`>>> [CRON] Auto-completed Order ID: ${order._id}`);
       } catch (err) {
+        await session.abortTransaction();
         console.error(`>>> [CRON] Error processing Order ${order._id}:`, err);
+      } finally {
+        session.endSession();
       }
     }
   });

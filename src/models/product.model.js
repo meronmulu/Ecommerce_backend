@@ -65,6 +65,10 @@ const productSchema = new mongoose.Schema(
       type: String,
       default: "Addis Ababa", // Default for MVP
     },
+    views: {
+      type: Number,
+      default: 0,
+    },
   },
   { timestamps: true },
 );

@@ -42,4 +42,9 @@ const orderSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+// Compound indexes for faster filtering in "My Orders"
+orderSchema.index({ buyerId: 1, status: 1, createdAt: -1 });
+orderSchema.index({ sellerId: 1, status: 1, createdAt: -1 });
+orderSchema.index({ productId: 1 });
+
 module.exports = mongoose.model("Order", orderSchema);

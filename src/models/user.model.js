@@ -45,4 +45,10 @@ const userSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+// Efficiency indexes
+userSchema.index({ email: 1 }); // Already unique: true, but explicit index is fine
+userSchema.index({ role: 1 });
+userSchema.index({ "kyc.status": 1 });
+userSchema.index({ resetPasswordToken: 1 }, { sparse: true }); // Sparse because not all users have it
+
 module.exports = mongoose.model("User", userSchema);
