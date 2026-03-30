@@ -62,8 +62,7 @@ const createProduct = async (req, res) => {
       data: product,
     });
   } catch (error) {
-    console.error("Create Product Error:", error);
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -129,29 +128,32 @@ const getProducts = async (req, res) => {
     })
       .populate("sellerId", "name profileImage location") 
       .sort(search ? { score: { $meta: "textScore" } } : sortObj)
-      .limit(queryLimit);
+      .limit(queryLimit)
+      .lean();
 
     res.json({ success: true, data: products });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
 // GET SINGLE PRODUCT (For Details Page)
 const getProductById = async (req, res) => {
   try {
-    const product = await Product.findById(req.params.id).populate(
-      "sellerId",
-      "name role isEmailVerified phone location profileImage",
-    );
+    const product = await Product.findById(req.params.id)
+      .populate(
+        "sellerId",
+        "name role isEmailVerified phone location profileImage",
+      )
+      .lean();
 
     if (!product) {
-      return res.status(404).json({ message: "Product not found" });
+      return res.status(404).json({ success: false, message: "Product not found" });
     }
 
     res.json({ success: true, data: product });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -161,19 +163,19 @@ const deleteProduct = async (req, res) => {
     const product = await Product.findById(req.params.id);
 
     if (!product) {
-      return res.status(404).json({ message: "Product not found" });
+      return res.status(404).json({ success: false, message: "Product not found" });
     }
 
     // Check ownership
     if (product.sellerId.toString() !== req.user.userId) {
-      return res.status(403).json({ message: "You are not authorized to delete this product" });
+      return res.status(403).json({ success: false, message: "You are not authorized to delete this product" });
     }
 
     await Product.findByIdAndDelete(req.params.id);
 
     res.json({ success: true, message: "Product deleted successfully" });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -227,7 +229,7 @@ const updateProduct = async (req, res) => {
     let specs = req.body.specs;
     if (typeof specs === 'string') {
       try {
-        specs = json.parse(specs);
+        specs = JSON.parse(specs);
       } catch (e) {
          // Ignore if not JSON
       }

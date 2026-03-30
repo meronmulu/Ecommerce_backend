@@ -7,6 +7,7 @@ const { Server } = require("socket.io");
 const path = require("path");
 const cors = require("cors");
 const connectDB = require("./src/config/db");
+const errorMiddleware = require("./src/middlewares/errorMiddleware");
 
 const app = express();
 const server = http.createServer(app);
@@ -79,13 +80,7 @@ app.use((req, res) => {
 });
 
 // Error handler
-app.use((err, req, res, next) => {
-  console.error("❌ Server Error:", err);
-  res.status(500).json({
-    success: false,
-    message: err.message || "Internal server error",
-  });
-});
+app.use(errorMiddleware);
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, "0.0.0.0", () => {

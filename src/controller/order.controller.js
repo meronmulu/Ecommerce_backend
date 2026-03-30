@@ -1,5 +1,6 @@
 // ================== FILE: server/controller/order.controller.js ==================
 
+const mongoose = require("mongoose");
 const Order = require("../models/order.model");
 const Product = require("../models/product.model");
 const User = require("../models/user.model");
@@ -123,47 +124,69 @@ const confirmDelivery = async (req, res) => {
 // 4. COMPLETE ORDER (FUNDS RELEASE)
 // Triggered manually by Buyer, OR automatically by Cron Job
 const completeOrder = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
   try {
-    const order = await Order.findById(req.params.id);
+    const order = await Order.findById(req.params.id).session(session);
 
-    if (!order) return res.status(404).json({ message: "Order not found" });
+    if (!order) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({ success: false, message: "Order not found" });
+    }
 
     // Only Buyer can manually accept
     if (order.buyerId.toString() !== req.user.userId) {
-      return res.status(403).json({ message: "Only buyer can accept item" });
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(403).json({ success: false, message: "Only buyer can accept item" });
     }
 
     if (order.status !== "DELIVERED") {
-      return res.status(400).json({ message: "Item must be delivered first" });
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ success: false, message: "Item must be delivered first" });
     }
 
-    if (order.status === "COMPLETED")
-      return res.status(400).json({ message: "Already completed" });
-
-    // --- ATOMIC TRANSACTION (SAFE WALLET) ---
+    if (order.status === "COMPLETED") {
+       await session.abortTransaction();
+       session.endSession();
+       return res.status(400).json({ success: false, message: "Already completed" });
+    }
 
     // 1. Add money to Seller Wallet
-    await User.findByIdAndUpdate(order.sellerId, {
-      $inc: { walletBalance: order.amount },
-    });
+    await User.findByIdAndUpdate(order.sellerId, 
+      { $inc: { walletBalance: order.amount } },
+      { session }
+    );
 
     // 2. Mark Product Sold
-    await Product.findByIdAndUpdate(order.productId, { status: "SOLD" });
+    await Product.findByIdAndUpdate(order.productId, 
+      { status: "SOLD" },
+      { session }
+    );
 
     // 3. Mark Order Complete
     order.status = "COMPLETED";
-    await order.save();
+    await order.save({ session });
 
-    // Notify Seller
+    await session.commitTransaction();
+    session.endSession();
+
+    // Notify Seller (External to transaction)
     const io = req.app.get("socketio");
-    io.to(order.sellerId.toString()).emit("wallet_update", {
-      message: `You received ${order.amount} ETB!`,
-      amount: order.amount,
-    });
+    if (io) {
+      io.to(order.sellerId.toString()).emit("wallet_update", {
+        message: `You received ${order.amount} ETB!`,
+        amount: order.amount,
+      });
+    }
 
     res.json({ success: true, message: "Funds released to seller!" });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    await session.abortTransaction();
+    session.endSession();
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
