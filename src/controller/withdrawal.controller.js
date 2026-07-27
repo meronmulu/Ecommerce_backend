@@ -19,4 +19,16 @@ const requestWithdrawal = async (req, res) => {
   });
   res.status(201).json({ success: true, data: w });
 };
-module.exports = { requestWithdrawal };
+
+const getMyWithdrawals = async (req, res) => {
+  try {
+    const withdrawals = await Withdrawal.find({ sellerId: req.user.userId })
+      .sort({ createdAt: -1 })
+      .lean();
+    res.json({ success: true, data: withdrawals });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+module.exports = { requestWithdrawal, getMyWithdrawals };

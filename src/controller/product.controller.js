@@ -136,6 +136,17 @@ const getProducts = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+// GET MY PRODUCTS (For Seller Dashboard)
+const getMyProducts = async (req, res) => {
+  try {
+    const products = await Product.find({ sellerId: req.user.userId })
+      .sort({ createdAt: -1 })
+      .lean();
+    res.json({ success: true, data: products });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
 
 // GET SINGLE PRODUCT (For Details Page)
 const getProductById = async (req, res) => {
@@ -258,6 +269,7 @@ const updateProduct = async (req, res) => {
 module.exports = {
   createProduct,
   getProducts,
+  getMyProducts,
   getProductById,
   deleteProduct,
   updateProductStatus,

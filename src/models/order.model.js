@@ -36,6 +36,8 @@ const orderSchema = new mongoose.Schema(
       default: "PENDING",
     },
 
+    disputeReason: { type: String },
+
     deliveredAt: { type: Date },
     autoConfirmAt: { type: Date }, // 24hr timer
   },
