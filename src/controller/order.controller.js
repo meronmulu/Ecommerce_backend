@@ -207,10 +207,40 @@ const getMyOrders = async (req, res) => {
   }
 };
 
+// 6. DISPUTE ORDER
+const disputeOrder = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+    
+    const order = await Order.findById(id);
+
+    if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+
+    // Ensure it's the buyer disputing
+    if (order.buyerId.toString() !== req.user.userId) {
+      return res.status(403).json({ success: false, message: "Only buyer can dispute order" });
+    }
+
+    if (order.status !== "DELIVERED" && order.status !== "SHIPPED") {
+      return res.status(400).json({ success: false, message: "Cannot dispute order at this stage" });
+    }
+
+    order.status = "DISPUTED";
+    order.disputeReason = reason;
+    await order.save();
+
+    res.json({ success: true, message: "Order disputed successfully", data: order });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 module.exports = {
   createOrder,
   markShipped,
   confirmDelivery,
   completeOrder,
   getMyOrders,
+  disputeOrder,
 };

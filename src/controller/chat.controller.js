@@ -234,4 +234,22 @@ const deleteConversation = async (req, res) => {
   }
 };
 
-module.exports = { sendMessage, getConversations, getChatHistory, deleteConversation };
+// MARK CONVERSATION AS READ (REST API)
+const markAsRead = async (req, res) => {
+  try {
+    const { conversationId } = req.params;
+
+    // Mark messages as read where the current user is the receiver
+    await Message.updateMany(
+      { conversationId, receiverId: req.user.userId, isRead: false },
+      { $set: { isRead: true } }
+    );
+
+    res.json({ success: true, message: "Messages marked as read" });
+  } catch (error) {
+    console.error("Mark as Read Error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+module.exports = { sendMessage, getConversations, getChatHistory, deleteConversation, markAsRead };
