@@ -53,6 +53,7 @@ app.use("/api/chat", require("./src/routes/chat.routes"));
 app.use("/api/orders", require("./src/routes/order.routes"));
 app.use("/api/withdrawals", require("./src/routes/withdrawal.routes"));
 app.use("/api/payments", require("./src/routes/payment.routes")); // Also adding payments which was missing
+app.use("/api/admin", require("./src/routes/admin.routes"));
 
 // Root route
 app.get("/", (req, res) => {

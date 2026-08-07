@@ -8,6 +8,7 @@ const {
   confirmDelivery,
   completeOrder,
   getMyOrders,
+  disputeOrder,
 } = require("../controller/order.controller");
 const { authenticate } = require("../middlewares/authMiddleware");
 
@@ -16,5 +17,6 @@ router.get("/my", authenticate, getMyOrders);
 router.put("/:id/shipped", authenticate, markShipped);
 router.post("/verify-delivery", authenticate, confirmDelivery);
 router.put("/:id/complete", authenticate, completeOrder);
+router.post("/:id/dispute", authenticate, disputeOrder);
 
 module.exports = router;
